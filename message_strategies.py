@@ -70,6 +70,11 @@ class GenericMessageStrategy:
                     msgs.append({"role":"user","content": TASK_REQUIREMENTS["PS_Generation"].strip()})
                 else:
                     msgs.append({"role":"user","content": TASK_REQUIREMENTS["PS_Generation_Dependent"].strip()})
+        
+        if gen_method == "dependent" and not is_first:
+            previous_responses = conversation.get_previous_responses(current_phase="idea_generation")
+            history_str = "\n".join(previous_responses) if previous_responses else "No previous responses."
+            msgs.append({"role": "user", "content": f"Previous ideas from other agents:\n{history_str}\n"})
 
     def _add_selection_instructions(self, msgs, agent, conversation):
         sel_method= self.task_config.get("selection_method","rating")
@@ -96,7 +101,7 @@ class GenericMessageStrategy:
         sel_method = self.task_config.get("selection_method", "rating")
 
         # Fetch and format previous responses
-        previous_responses = conversation.get_previous_responses(idea_index if disc_method == "one_by_one" else None)
+        previous_responses = conversation.get_previous_responses(idea_index if disc_method == "one_by_one" else None,current_phase="discussion")
         history_str = "\n".join(previous_responses) if previous_responses else "No previous responses."
 
         # Setup the task-specific prompt
@@ -194,7 +199,7 @@ class GenericMessageStrategy:
 
         # Fetch previous responses
         disc_method = self.task_config.get("discussion_method", "all_at_once")
-        previous_responses = conversation.get_previous_responses(idea_index if disc_method == "one_by_one" else None)
+        previous_responses = conversation.get_previous_responses(idea_index if disc_method == "one_by_one" else None,current_phase="discussion")
         history_str = "\n".join(previous_responses) if previous_responses else "No previous responses."
 
         # Construct message content

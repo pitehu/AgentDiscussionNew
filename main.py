@@ -15,11 +15,11 @@ def main(skip_to_discussion=False):
         agents = []
         for role_name in chosen_roles:
             sys_msg = ROLES.get(role_name, f"You are {role_name}.")
-            agent = Agent(name=role_name, system_message=sys_msg, config={"model": "gpt-4o-mini"})
+            agent = Agent(name=role_name, system_message=sys_msg, config={"model": "gpt-4o"})
             agents.append(agent)
 
         task_config = {
-            "task_type": "AUT",               # "AUT" or "PS"
+            "task_type": "PS",               # "AUT" or "PS"
             "phases": "three_stage",          # "three_stage" or "direct_discussion"
             "generation_method": "dependent", # "independent" or "dependent"
             "selection_method": "rating", # "selectionTop" or "rating"

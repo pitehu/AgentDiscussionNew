@@ -89,23 +89,62 @@ class Conversation:
             )
         return summary
 
-    def get_previous_responses(self, idea_index=None):
+    # def get_previous_responses(self, idea_index=None):
+    #     """
+    #     Retrieve the last 3 responses from the chat history where phase='discussion'.
+    #     Optionally filter by idea_index if provided.
+    #     """
+    #     phases = self.task_config.get("phases", "three_stage")
+    #     previous_responses = []
+    #     for entry in reversed(self.chat_history):
+    #         if entry['phase'] == 'discussion' or phases == 'direct_discussion':
+    #             if idea_index is not None:
+    #                 if entry.get('idea_index') == idea_index:
+    #                     previous_responses.append(f"{entry['agent']}: {entry['response']}")
+    #             else:
+    #                 previous_responses.append(f"{entry['agent']}: {entry['response']}")
+    #         if len(previous_responses) == 3:
+    #             break
+    #     return list(reversed(previous_responses))
+
+    def get_previous_responses(self, idea_index=None, current_phase=None):
         """
-        Retrieve the last 3 responses from the chat history where phase='discussion'.
-        Optionally filter by idea_index if provided.
+        Retrieve the last 3 responses from the chat history **within the same phase**.
+        
+        If `current_phase` is provided, only responses from that phase will be retrieved.
+        
+        - `idea_index` (optional): If provided, filters by a specific idea index.
+        - `current_phase` (optional): Ensures we only fetch responses from a specific phase.
         """
-        phases = self.task_config.get("phases", "three_stage")
         previous_responses = []
+        
+        # 获取当前任务的阶段 (默认是 "three_stage")
+        task_phases = self.task_config.get("phases", "three_stage")
+        
         for entry in reversed(self.chat_history):
-            if entry['phase'] == 'discussion' or phases == 'direct_discussion':
+            entry_phase = entry["phase"]
+
+            # 只获取当前阶段的历史记录
+            if current_phase and entry_phase != current_phase:
+                continue
+
+            # 处理讨论阶段
+            if entry_phase == "discussion" or task_phases == "direct_discussion":
                 if idea_index is not None:
-                    if entry.get('idea_index') == idea_index:
-                        previous_responses.append(f"{entry['agent']}: {entry['response']}")
+                    if entry.get("idea_index") == idea_index:
+                        previous_responses.append(f"\n{entry['agent']}: {entry['response']}")
                 else:
-                    previous_responses.append(f"{entry['agent']}: {entry['response']}")
-            if len(previous_responses) == 3:
+                    previous_responses.append(f"\n{entry['agent']}: {entry['response']}")
+
+            # 处理想法生成阶段
+            elif entry_phase == "idea_generation":
+                previous_responses.append(f"\n{entry['agent']}: {entry['response']}")
+
+            if len(previous_responses) == 3:  # 仅获取最近3条
                 break
+
         return list(reversed(previous_responses))
+
 
     def add_chat_entry(self, agent_name, prompt, response, phase, idea_index=None, prompt_tokens=0, completion_tokens=0):
         """

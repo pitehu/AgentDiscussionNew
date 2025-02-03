@@ -93,6 +93,9 @@ class GenericDiscussionMode:
         agents= self.conversation.agents[:]
         if self.task_config.get("discussion_order_method")=="random":
             random.shuffle(agents)
+        
+        if not self.data_strategy.first_agent_name and agents:
+            self.data_strategy.first_agent_name = agents[0].name
 
         for ag in agents:
             self.conversation.current_agent= ag
