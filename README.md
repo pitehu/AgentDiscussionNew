@@ -16,8 +16,6 @@
 
 4. **`discussion_modes.py`**
    - Implements different discussion modes:
-     - **All-at-once**: Multiple agents discuss simultaneously.
-     - **One-by-one**: Agents respond sequentially.
    - Orchestrates the flow of agents and manages their responses.
 
 5. **`message_strategies.py`**
@@ -26,7 +24,7 @@
 
 6. **`config.py`**
    - Stores global configuration settings, such as task types, phases, and discussion order.
-   - Important: Ensure to add your API key for models
+   - **Important**: Ensure to add your API key for models
 
 7. **`prompts.py`**
    - Contains predefined task requirements and prompts used throughout the discussion.
