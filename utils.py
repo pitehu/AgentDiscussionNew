@@ -2,7 +2,7 @@
 
 from tiktoken import encoding_for_model
 
-def calculate_tokens(messages, model="gpt-4"):
+def calculate_tokens(messages, model="gpt-4o"):
     """
     Calculate the number of tokens used in a list of messages or parsed content.
     Each input should be a dictionary with 'role' and 'content', or a parsed object.

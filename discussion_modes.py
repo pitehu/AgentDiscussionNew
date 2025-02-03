@@ -34,7 +34,7 @@ class GenericDiscussionMode:
                 self.run_selection()
             else:
                 # Example preloaded ideas and rankings
-                # 初始化所有想法
+                # initialize all the ideas
                 # self.data_strategy.all_ideas = [
                 #     {"idea": "Create a portable clothesline for camping by suspending rope between trees.", "agent": "CFO"},
                 #     {"idea": "Fashion a quick improvised belt for holding up trousers in an emergency.", "agent": "CFO"},
@@ -53,7 +53,6 @@ class GenericDiscussionMode:
                 #     {"idea": "Garden trellis support for climbing plants and vegetables.", "agent": "CEO"}
                 # ]
 
-                # # 初始化每个 agent 的选择
                 # self.data_strategy.agent_selected_ideas = {
                 #     "CEO": [0, 10, 2, 5, 3],
                 #     "CTO": [1, 2, 5, 10, 9],

@@ -190,20 +190,17 @@ class GenericDataStrategy:
             return len(self.agreed_agents_ps)== len(agents)
 
     def update_shared_data(self, conversation, agent_response):
-        """
-        这里演示GPT+JSON_SCHEMA解析 => {If_agree, current_ideas, replacement_ideas}
-        """
+
         agent_name= conversation.current_agent.name
 
-        # 1) 调用 GPT 解析 agent_response => 可能包含 "If_agree", "current_ideas", "replacement_ideas"
+        # 1) use GPT to interprete agent_response =>  "If_agree", "current_ideas", "replacement_ideas"
         # Call the parsing function
         parse_result, prompt_tokens, completion_tokens = self._parse_agent_response_with_gpt(agent_response, agent_name)
 
         # Update token usage in the conversation
         conversation.update_phase_token_usage("other",prompt_tokens, completion_tokens)
 
-        # 2) 如果 parse_result["If_agree"] == True => self._set_agent_agreed
-        # 根据解析结果执行相应的操作
+        # 2) if parse_result["If_agree"] == True => self._set_agent_agreed
         action_type = parse_result.action_type
         self.current_ideas = parse_result.current_ideas
 
@@ -221,18 +218,15 @@ class GenericDataStrategy:
             if action_type == "agree":
                 self._set_agent_agreed(agent_name)
             elif action_type in {"modify", "replace","adjust"}:
-                # 处理 modify 和 replace 的更新逻辑
+
                 print(f"Agent {agent_name} chose to {action_type} ideas.")
                 self.reset_agreements()
                 sel_method = self.task_config.get("selection_method", "rating")
                 if sel_method == "selectionTop":
-                    # selectionTop 模式下更新 agent-specific 的 replacement_ideas
                     self.agent_replacement_ideas[agent_name] = parse_result.replacement_ideas
+                
                 else:
-                    # rating 模式下更新全局 replacement_ideas
                     self.replacement_ideas = parse_result.replacement_ideas
-
-                    # 仅在 rating 模式下检查替换池的大小并补充
                     ttype = self.task_config.get("task_type", "AUT")
                     if ttype == "AUT":
                         desired_size = 5
@@ -286,8 +280,8 @@ class GenericDataStrategy:
         """
         class AgentResponse(BaseModel):
             action_type: str  # "agree", "modify", or "replace"
-            current_ideas: List[str]  # 移除了默认值
-            replacement_ideas: List[str]  # 同样移除了默认值
+            current_ideas: List[str]  
+            replacement_ideas: List[str]  
 
         # 1) figure out which replacement pool to display:
         sel_method = self.task_config.get("selection_method", "rating")
@@ -507,7 +501,7 @@ class GenericDataStrategy:
         """
         class AgentResponse(BaseModel):
             action_type: str  # "agree", "modify", or "replace"
-            current_ideas: List[str]  # 移除了默认值
+            current_ideas: List[str]  
 
         current_str = "\n".join(f"- {idea}" for idea in self.current_ideas)
 

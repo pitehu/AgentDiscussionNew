@@ -31,7 +31,7 @@ def main(skip_to_discussion=False):
         conversation = Conversation(agents=agents, data_strategy=data_strategy, task_config=task_config)
         discussion = GenericDiscussionMode(conversation, task_config, message_strategy)
 
-        # 调用 run 时传递 skip_to_discussion 参数
+        # skip_to_discussion parameter
         discussion.run(skip_to_discussion=skip_to_discussion)
     except Exception as e:
         logging.error("An error occurred during the discussion: %s", e)
@@ -42,5 +42,5 @@ def main(skip_to_discussion=False):
 
 
 if __name__ == "__main__":
-    # 控制是否直接跳到讨论阶段
+    # Default: False (set to True for debugging) 
     main(skip_to_discussion=False)

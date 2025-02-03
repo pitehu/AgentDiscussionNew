@@ -118,17 +118,17 @@ class Conversation:
         """
         previous_responses = []
         
-        # 获取当前任务的阶段 (默认是 "three_stage")
+        # get current phase (defalut: "three_stage")
         task_phases = self.task_config.get("phases", "three_stage")
         
         for entry in reversed(self.chat_history):
             entry_phase = entry["phase"]
 
-            # 只获取当前阶段的历史记录
+            # histofy from current phase
             if current_phase and entry_phase != current_phase:
                 continue
 
-            # 处理讨论阶段
+            # discussion phase
             if entry_phase == "discussion" or task_phases == "direct_discussion":
                 if idea_index is not None:
                     if entry.get("idea_index") == idea_index:
@@ -136,11 +136,11 @@ class Conversation:
                 else:
                     previous_responses.append(f"\n{entry['agent']}: {entry['response']}")
 
-            # 处理想法生成阶段
+            # idea_generation phase
             elif entry_phase == "idea_generation":
                 previous_responses.append(f"\n{entry['agent']}: {entry['response']}")
 
-            if len(previous_responses) == 3:  # 仅获取最近3条
+            if len(previous_responses) == 3:  # lastest 3 responses
                 break
 
         return list(reversed(previous_responses))

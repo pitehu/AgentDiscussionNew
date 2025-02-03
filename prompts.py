@@ -1,6 +1,6 @@
 # prompts.py
 
-# ========== AUT 相关 ========== #
+# ========== AUT ========== #
 AUT_MODE1_OVERALL = """
 Task: You are collaborating with two other team members to come up with five unusual uses of a rope.
 Your ideas will be evaluated on their creativity (i.e., they should be both novel and useful).
@@ -79,13 +79,6 @@ AUT_MODE1_DISCUSSION_SELECTIONTOP_ALLATONCE_OTHERAGENTS = """
     "Modify: [idea after modification] - Reason: [specific reason for improvement]."
   - **Replace:** If the idea is not creative or not aligned with the task objective, replace it with one from the replacement pool of top ideas selected by yourself. Use this format:
     "Replace: [replacement idea] - Reason: [specific reason for replacement]."
-
-- **Guidelines for Reviewing the List**:
-  1. Carefully evaluate each idea in the list based on the task objective.
-  2. Do not summarize or output a final revised list. Focus only on evaluating individual ideas. 
-  3. Avoid unnecessary changes: While you can suggest improvement or replacement, keep in mind that there are **a maximum of 20 rounds** for your team. If you disapprove one idea, prioritise improving it over replacing it.
-  4. Be concise: Each idea should be **within 20 words**.
-  5. Focus on meaningful improvement or replacement that enhances alignment with the task objective.
 """
 
 
@@ -125,7 +118,7 @@ AUT_MODE1_DISCUSSION_SELECTIONTOP_ONEBYONE = """
   3. Focus on meaningful improvement or replacement that enhances alignment with the task objective.
 """
 
-# ========== Problem Solving 相关 ========== #
+# ========== Problem Solving ========== #
 PS_OVERALL = """
 Task: You are collaborating with two other team members to come up with one creative idea for a problem: Employees’ wellbeing is considered one of the top workforce concerns. Please come up with one creative idea for companies to support employees’ wellbeing.  
 Your answers will be evaluated on its creativity (i.e., it should be both novel and useful).
@@ -158,7 +151,19 @@ PS_SELECTION_SELECTIONTOP = """
 """
 
 PS_DISCUSSION_RATING = """
-- You are reviewing the current list of top ideas. 
+- You are reviewing the current top idea. 
+- Your team has a maximum of 20 rounds to finalize the list of ideas. You are currently on round {{total_resp}}.
+
+- Actions you can take for the idea:
+  - **Agree:** If the idea meets the task objective and does not require changes, reply "Agree: No changes needed."
+  - **Modify:** If the idea is aligned with the task objective but needs improvement, propose modification. Use this format:
+    "Modify: [idea after modification] - Reason: [specific reason for improvement]."
+  - **Replace:** If the idea is not creative or not aligned with the task objective, replace it with one from the shared replacement pool of top ideas. Use this format:
+    "Replace: [replacement idea] - Reason: [specific reason for replacement]."
+"""
+
+PS_DISCUSSION_RATING_PRE = """
+- You are reviewing the current top idea. 
 - Your team has a maximum of 20 rounds to finalize the list of ideas. You are currently on round {{total_resp}}.
 
 - Actions you can take for each idea:
@@ -167,14 +172,21 @@ PS_DISCUSSION_RATING = """
     "Modify: [idea after modification] - Reason: [specific reason for improvement]."
   - **Replace:** If the idea is not creative or not aligned with the task objective, replace it with one from the shared replacement pool of top ideas. Use this format:
     "Replace: [replacement idea] - Reason: [specific reason for replacement]."
-
-- **Guidelines for Reviewing the List**:
-  1. Avoid unnecessary changes: While you can suggest improvement or replacement, keep in mind that there are **a maximum of 20 rounds** for your team. If you disapprove one idea, prioritise improving it over replacing it.
-  2. Be concise: Each idea should be **within 100 words**.
-  3. Focus on meaningful improvement or replacement that enhances alignment with the task objective.
 """
 
 PS_DISCUSSION_SELECTIONTOP = """
+- You are reviewing the current list of top ideas.
+- Your team has a maximum of 20 rounds to finalize the list of ideas. You are currently on round {{total_resp}}.
+
+- Actions you can take for the idea:
+  - **Agree:** If the idea meets the task objective and does not require changes, reply "Agree: No changes needed."
+  - **Modify:** If the idea is aligned with the task objective and needs improvement to be better, propose modification. Use this format:
+    "Modify: [idea after modification] - Reason: [specific reason for improvement]."
+  - **Replace:** If the idea is not creative or not aligned with the task objective, replace it with one from the replacement pool of top ideas selected by yourself. Use this format:
+    "Replace: [replacement idea] - Reason: [specific reason for replacement]."
+"""
+
+PS_DISCUSSION_SELECTIONTOP_PRE = """
 - You are reviewing the current list of top ideas.
 - Your team has a maximum of 20 rounds to finalize the list of ideas. You are currently on round {{total_resp}}.
 
@@ -184,12 +196,9 @@ PS_DISCUSSION_SELECTIONTOP = """
     "Modify: [idea after modification] - Reason: [specific reason for improvement]."
   - **Replace:** If the idea is not creative or not aligned with the task objective, replace it with one from the replacement pool of top ideas selected by yourself. Use this format:
     "Replace: [replacement idea] - Reason: [specific reason for replacement]."
-
-- **Guidelines for Reviewing the List**:
-  1. Avoid unnecessary changes: While you can suggest improvement or replacement, keep in mind that there are **a maximum of 20 rounds** for your team. If you disapprove one idea, prioritise improving it over replacing it.
-  2. Be concise: Each idea should be **within 100 words**.
-  3. Focus on meaningful improvement or replacement that enhances alignment with the task objective.
 """
+
+# ========== Direct Discussion ========== #
 
 AUT_DIRECT_FIRST_ROUND_ALL_AT_ONCE = """
 - You are initiating the discussion for a collaborative task. Please propose 5 unusual uses of a rope.
@@ -255,13 +264,9 @@ PS_DIRECT_DISCUSSION_ALL_AT_ONCE = """
     "Modify: [idea after modification] - Reason: [specific reason for improvement]."
   - **Replace:** If the idea is not creative or not aligned with the task objective, propose a new idea to replace the current one. Use this format:
     "Replace: [replacement idea] - Reason: [specific reason for replacement]."
-
-- **Guidelines**:
-  1. Avoid unnecessary changes: While you can suggest improvement or replacement, keep in mind that there are **a maximum of 30 rounds** for your team. If you disapprove one idea, prioritise improving it over replacing it.
-  2. Be concise: Each idea should be **within 100 words**.
-  3. Focus on meaningful improvement or replacement that enhances alignment with the task objective.
 """
 
+# ========== Raising hands ========== #
 INTENTION_PROMPT_IDEAS = """
 - Looking at the current list of ideas, please indicate how strongly you feel like responding (1-7)
 - Provide your score in the following format: Score:X (replace X with your score).
@@ -272,8 +277,8 @@ INTENTION_PROMPT_IDEA = """
 - Provide your score in the following format: Score:X (replace X with your score).
 """
 
+# ========== Input into Dictionairy ========== #
 
-# 统一放入字典
 TASK_REQUIREMENTS = {
     "AUT_Mode1_Overall": AUT_MODE1_OVERALL,
     "AUT_Mode1_IdeaGeneration": AUT_MODE1_IDEA_GENERATION,
