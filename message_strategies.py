@@ -74,7 +74,7 @@ class GenericMessageStrategy:
         if gen_method == "dependent" and not is_first:
             previous_responses = conversation.get_previous_responses(current_phase="idea_generation")
             history_str = "\n".join(previous_responses) if previous_responses else "No previous responses."
-            msgs.append({"role": "user", "content": f"Previous ideas from other agents:\n{history_str}\n"})
+            msgs.append({"role": "user", "content": f"\nPrevious ideas from other agents:\n{history_str}\n"})
 
     def _add_selection_instructions(self, msgs, agent, conversation):
         sel_method= self.task_config.get("selection_method","rating")
@@ -139,8 +139,15 @@ class GenericMessageStrategy:
         msgs.append({"role": "system", "content": prompt.strip()})
 
         # Insert previous responses before current and replacement ideas
-        msgs.append({"role": "user", "content": "\nOther team members' feedback on this idea so far (last 3 responses):\n" + history_str +"\n"})
+        msgs.append({"role": "user", "content": "\nBelow is the discussion history for the past three rounds. Other team members' feedback on these ideas so far (last 3 responses (in chronological order):\n" + history_str +"\n"})
 
+        # Add replaced ideas if available
+        if self.data_strategy.replaced_ideas:
+            replaced_ideas_str = "\n".join(f"{i+1}. {idea}" for i, idea in enumerate(self.data_strategy.replaced_ideas))
+            replaced_ideas_section = f"\nPrevious replaced ideas:\n{replaced_ideas_str}"
+            msgs.append({"role": "user", "content": replaced_ideas_section +"\n"})
+
+        
         # Construct and display current and replacement ideas information
         current_ideas_str = "\n".join(f"{i+1}. {txt}" for i, txt in enumerate(self.data_strategy.current_ideas))
         replacement_ideas_str = self.get_replacement_ideas_str(agent, sel_method)
@@ -204,7 +211,7 @@ class GenericMessageStrategy:
 
         # Construct message content
         msgs.append({"role": "system", "content": prompt.strip()})
-        msgs.append({"role": "user", "content": f"\n\nOther team members' feedback on this idea so far (last 3 responses):\n{history_str}"})
+        msgs.append({"role": "user", "content": f"\n\nBelow is the discussion history for the past three rounds. Other team members' feedback on these ideas so far (last 3 responses (in chronological order):\n{history_str}"})
 
         # Add current and replacement ideas
         if total_resp == 0 or (disc_method == 'one_by_one' and current_round == 1):

@@ -110,43 +110,58 @@ class Conversation:
     def get_previous_responses(self, idea_index=None, current_phase=None):
         """
         Retrieve the last 3 responses from the chat history **within the same phase**.
-        
-        If `current_phase` is provided, only responses from that phase will be retrieved.
-        
+        If in discussion phase, include the n-3 round's current_ideas and n-3/n-2/n-1 responses.
+
         - `idea_index` (optional): If provided, filters by a specific idea index.
         - `current_phase` (optional): Ensures we only fetch responses from a specific phase.
         """
         previous_responses = []
-        
-        # get current phase (defalut: "three_stage")
+        n_minus_3_ideas = None  # To store n-3 round's current_ideas
+
+        # Get current task phases (default: "three_stage")
         task_phases = self.task_config.get("phases", "three_stage")
-        
-        for entry in reversed(self.chat_history):
+
+        for i, entry in enumerate(reversed(self.chat_history)):
             entry_phase = entry["phase"]
 
-            # histofy from current phase
+            # Filter by current phase if specified
             if current_phase and entry_phase != current_phase:
                 continue
 
-            # discussion phase
+            # Handle discussion phase
             if entry_phase == "discussion" or task_phases == "direct_discussion":
+                if len(previous_responses) == 0:  # First response to include in n-3
+                    n_minus_3_ideas = entry.get("current_ideas", [])
+
                 if idea_index is not None:
                     if entry.get("idea_index") == idea_index:
-                        previous_responses.append(f"\n{entry['agent']}: {entry['response']}")
+                        previous_responses.append(f"\n{entry['agent']} said: {entry['response']}")
                 else:
-                    previous_responses.append(f"\n{entry['agent']}: {entry['response']}")
+                    previous_responses.append(f"\n{entry['agent']} said: {entry['response']}")
 
-            # idea_generation phase
+            # Handle idea_generation phase
             elif entry_phase == "idea_generation":
-                previous_responses.append(f"\n{entry['agent']}: {entry['response']}")
+                previous_responses.append(f"\n{entry['agent']} said: {entry['response']}")
 
-            if len(previous_responses) == 3:  # lastest 3 responses
+            # Break if we have collected 3 responses
+            if len(previous_responses) == 3:
                 break
 
-        return list(reversed(previous_responses))
+        # Reverse responses for chronological order
+        previous_responses = list(reversed(previous_responses))
+
+        # Include n-3 round's current_ideas if available
+        if current_phase == "discussion" and n_minus_3_ideas:
+            current_ideas_str = "\n".join(f"{i+1}. {idea}" for i, idea in enumerate(n_minus_3_ideas))
+            previous_responses.insert(
+                0, f"The initial ideas under discussion before team feedback:\n{current_ideas_str if current_ideas_str else '(none)'}\n"
+            )
+
+        return previous_responses
 
 
-    def add_chat_entry(self, agent_name, prompt, response, phase, idea_index=None, prompt_tokens=0, completion_tokens=0):
+
+    def add_chat_entry(self, agent_name, prompt, response, phase, idea_index=None, prompt_tokens=0, completion_tokens=0,current_ideas=None):
         """
         Add a chat entry and update token usage.
         """
@@ -158,7 +173,11 @@ class Conversation:
                 'phase': phase,
                 'idea_index': idea_index if idea_index is not None else "N/A",
             }
+
+            if phase == "discussion" and current_ideas is not None:
+                entry['current_ideas'] = list(current_ideas)  # Store a copy of the current_ideas list
             self.chat_history.append(entry)
+
 
             # Update phase and overall token usage
             self.update_phase_token_usage(phase, prompt_tokens, completion_tokens)
