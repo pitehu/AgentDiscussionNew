@@ -11,13 +11,13 @@ class GenericMessageStrategy:
 
     def construct_messages(self, agent, phase, conversation, idea_index=None,total_resp=None,current_round=None, max_rounds=None, include_intention_prompt=False):
         msgs=[]
-        msgs.append({"role":"system","content": agent.system_message})
+        msgs.append({"role":"system","content": f"# **Role**\n{agent.system_message}"})
 
         # Overall
         if self.task_config.get("task_type","AUT")=="AUT":
-            msgs.append({"role":"system","content": TASK_REQUIREMENTS["AUT_Mode1_Overall"].strip()})
+            msgs.append({"role":"system","content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['AUT_Mode1_Overall'].strip()}"})
         else:
-            msgs.append({"role":"system","content": TASK_REQUIREMENTS["PS_Overall"].strip()})
+            msgs.append({"role":"system","content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['PS_Overall'].strip()}"})
 
         if phase=="idea_generation":
             self._add_generation_instructions(msgs, agent, conversation)
@@ -31,7 +31,7 @@ class GenericMessageStrategy:
                 else:
                     intention_prompt = TASK_REQUIREMENTS["Intention_Prompt_Ideas"]
                 msgs.append({"role": "user", "content": "\n\n"+intention_prompt.strip()})
-        elif phase == "direct":
+        elif phase == "direct_discussion":
             self._add_direct_discussion_instructions(msgs, agent, conversation, total_resp, current_round)
             if include_intention_prompt:
                 intention_prompt = TASK_REQUIREMENTS["Intention_Prompt"]
@@ -55,26 +55,26 @@ class GenericMessageStrategy:
 
         if ttype=="AUT":
             if gen_method=="independent":
-                msgs.append({"role":"user","content": TASK_REQUIREMENTS["AUT_Mode1_IdeaGeneration"].strip()})
+                msgs.append({"role":"user","content": f"# **Current Task**\n{TASK_REQUIREMENTS['AUT_Mode1_IdeaGeneration'].strip()}"})
             else:
                 if is_first:
-                    msgs.append({"role":"user","content": TASK_REQUIREMENTS["AUT_Mode1_IdeaGeneration"].strip()})
+                    msgs.append({"role":"user","content": f"# **Current Task**\n{TASK_REQUIREMENTS['AUT_Mode1_IdeaGeneration'].strip()}"})
                 else:
-                    msgs.append({"role":"user","content": TASK_REQUIREMENTS["AUT_Mode1_IdeaGeneration_Dependent"].strip()})
+                    msgs.append({"role":"user","content": f"# **Current Task**\n{TASK_REQUIREMENTS['AUT_Mode1_IdeaGeneration_Dependent'].strip()}"})
         else:
             # PS
             if gen_method=="independent":
-                msgs.append({"role":"user","content": TASK_REQUIREMENTS["PS_Generation"].strip()})
+                msgs.append({"role":"user","content": f"# **Current Task**\n{TASK_REQUIREMENTS['PS_Generation'].strip()}"})
             else:
                 if is_first:
-                    msgs.append({"role":"user","content": TASK_REQUIREMENTS["PS_Generation"].strip()})
+                    msgs.append({"role":"user","content": f"# **Current Task**\n{TASK_REQUIREMENTS['PS_Generation'].strip()}"})
                 else:
-                    msgs.append({"role":"user","content": TASK_REQUIREMENTS["PS_Generation_Dependent"].strip()})
+                    msgs.append({"role":"user","content": f"# **Current Task**\n{TASK_REQUIREMENTS['PS_Generation_Dependent'].strip()}"})
         
         if gen_method == "dependent" and not is_first:
             previous_responses = conversation.get_previous_responses(current_phase="idea_generation")
             history_str = "\n".join(previous_responses) if previous_responses else "No previous responses."
-            msgs.append({"role": "user", "content": f"\nPrevious ideas from other agents:\n{history_str}\n"})
+            msgs.append({"role": "user", "content": f"# **Previous ideas from other agents**\n{history_str}\n"})
 
     def _add_selection_instructions(self, msgs, agent, conversation):
         sel_method= self.task_config.get("selection_method","rating")
@@ -82,14 +82,14 @@ class GenericMessageStrategy:
 
         if ttype=="AUT":
             if sel_method=="rating":
-                msgs.append({"role":"user","content": TASK_REQUIREMENTS["AUT_Mode1_Selection_Rating"].strip()})
+                msgs.append({"role":"user","content": f"# **Current Task**\n{TASK_REQUIREMENTS['AUT_Mode1_Selection_Rating'].strip()}"})
             else:
-                msgs.append({"role":"user","content": TASK_REQUIREMENTS["AUT_Mode1_Selection_SelectionTop"].strip()})
+                msgs.append({"role":"user","content": f"# **Current Task**\n{TASK_REQUIREMENTS['AUT_Mode1_Selection_SelectionTop'].strip()}"})
         else:
             if sel_method=="rating":
-                msgs.append({"role":"user","content": TASK_REQUIREMENTS["PS_Selection_Rating"].strip()})
+                msgs.append({"role":"user","content": f"# **Current Task**\n{TASK_REQUIREMENTS['PS_Selection_Rating'].strip()}"})
             else:
-                msgs.append({"role":"user","content": TASK_REQUIREMENTS["PS_Selection_SelectionTop"].strip()})
+                msgs.append({"role":"user","content": f"# **Current Task**\n{TASK_REQUIREMENTS['PS_Selection_SelectionTop'].strip()}"})
 
     def _add_discussion_instructions(self, msgs, agent, conversation, idea_index, total_resp=None, current_round=None, max_rounds=None):
         """
@@ -136,28 +136,32 @@ class GenericMessageStrategy:
                 )
 
         # Display task-specific prompt first
-        msgs.append({"role": "system", "content": prompt.strip()})
+        msgs.append({"role": "system", "content": f"\n# **Current Task**\n {prompt.strip()}"})
 
         # Insert previous responses before current and replacement ideas
-        msgs.append({"role": "user", "content": "\nBelow is the discussion history for the past three rounds. Other team members' feedback on these ideas so far (last 3 responses (in chronological order):\n" + history_str +"\n"})
+        msgs.append({"role": "user", "content": "\n# **Disucssion History**\nBelow is the discussion history for the past three rounds. Other team members' feedback on these ideas so far (last 3 responses, in chronological order):\n" + history_str +"\n"})
 
-        # Add replaced ideas if available
-        if self.data_strategy.replaced_ideas:
-            replaced_ideas_str = "\n".join(f"{i+1}. {idea}" for i, idea in enumerate(self.data_strategy.replaced_ideas))
-            replaced_ideas_section = f"\nPrevious replaced ideas:\n{replaced_ideas_str}"
-            msgs.append({"role": "user", "content": replaced_ideas_section +"\n"})
-
-        
-        # Construct and display current and replacement ideas information
         current_ideas_str = "\n".join(f"{i+1}. {txt}" for i, txt in enumerate(self.data_strategy.current_ideas))
         replacement_ideas_str = self.get_replacement_ideas_str(agent, sel_method)
 
-        # Append current and replacement ideas
-        current_and_replacement_info = (
-            f"Current Ideas under discussion:\n{current_ideas_str if current_ideas_str else '(none)'}\n\n"
-            f"Replacement Ideas (yours):\n{replacement_ideas_str if replacement_ideas_str else '(none)'}"
-        )
-        msgs.append({"role": "user", "content": current_and_replacement_info.strip()})
+        # 仅在 replaced_ideas 存在时拼接对应部分
+        if self.data_strategy.replaced_ideas:
+            replaced_ideas_str = "\n".join(f"{i+1}. {idea}" for i, idea in enumerate(self.data_strategy.replaced_ideas))
+            replaced_ideas_section = f"\n**Previously Replaced Ideas:**\n{replaced_ideas_str}"
+        else:
+            replaced_ideas_section = ""  # 不添加该部分
+
+        # Append structured message with Markdown formatting
+        msgs.append({"role": "user", "content": 
+            "# **Current, Replacement, and Replaced Ideas**\n"
+            "**Current Ideas Under Discussion:**\n"
+            f"{current_ideas_str if current_ideas_str else '(None)'}\n\n"
+            
+            "**Replacement Ideas (yours):**\n"
+            f"{replacement_ideas_str if replacement_ideas_str else '(None)'}"
+            f"{replaced_ideas_section}"  # 只有在 replaced_ideas 存在时才添加
+        })
+
     
 
     def get_replacement_ideas_str(self, agent, sel_method):
@@ -206,16 +210,16 @@ class GenericMessageStrategy:
 
         # Fetch previous responses
         disc_method = self.task_config.get("discussion_method", "all_at_once")
-        previous_responses = conversation.get_previous_responses(idea_index if disc_method == "one_by_one" else None,current_phase="discussion")
+        previous_responses = conversation.get_previous_responses(idea_index if disc_method == "one_by_one" else None,current_phase="direct_discussion")
         history_str = "\n".join(previous_responses) if previous_responses else "No previous responses."
 
         # Construct message content
-        msgs.append({"role": "system", "content": prompt.strip()})
-        msgs.append({"role": "user", "content": f"\n\nBelow is the discussion history for the past three rounds. Other team members' feedback on these ideas so far (last 3 responses (in chronological order):\n{history_str}"})
+        msgs.append({"role": "system", "content": f"\n# **Current Task**\n{prompt.strip()}"})
+        msgs.append({"role": "user", "content": f"\n# **Disucssion History**\nBelow is the discussion history for the past three rounds. Other team members' feedback on these ideas so far (last 3 responses, in chronological order): \n\n{history_str}"})
 
         # Add current and replacement ideas
         if total_resp == 0 or (disc_method == 'one_by_one' and current_round == 1):
             pass
         else:
             current_ideas_str = "\n".join(f"{i + 1}. {txt}" for i, txt in enumerate(self.data_strategy.current_ideas))
-            msgs.append({"role": "user", "content": f"\n\nCurrent Ideas:\n{current_ideas_str if current_ideas_str else '(none)'}"}) 
+            msgs.append({"role": "user", "content": f"\n# **Current Ideas Under Discussion:**\n{current_ideas_str if current_ideas_str else '(none)'}"}) 

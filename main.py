@@ -20,7 +20,7 @@ def main(skip_to_discussion=False):
 
         task_config = {
             "task_type": "PS",               # "AUT" or "PS"
-            "phases": "three_stage",          # "three_stage" or "direct_discussion"
+            "phases": "direct_discussion",          # "three_stage" or "direct_discussion"
             "generation_method": "dependent", # "independent" or "dependent"
             "selection_method": "rating", # "selectionTop" or "rating"
             "discussion_method": "all_at_once",  # "all_at_once" or "one_by_one"

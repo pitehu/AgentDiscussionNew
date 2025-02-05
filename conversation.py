@@ -119,7 +119,7 @@ class Conversation:
         n_minus_3_ideas = None  # To store n-3 round's current_ideas
 
         # Get current task phases (default: "three_stage")
-        task_phases = self.task_config.get("phases", "three_stage")
+        # task_phases = self.task_config.get("phases", "three_stage")
 
         for i, entry in enumerate(reversed(self.chat_history)):
             entry_phase = entry["phase"]
@@ -129,7 +129,7 @@ class Conversation:
                 continue
 
             # Handle discussion phase
-            if entry_phase == "discussion" or task_phases == "direct_discussion":
+            if entry_phase in ["discussion","direct_discussion"]:
                 if len(previous_responses) == 0:  # First response to include in n-3
                     n_minus_3_ideas = entry.get("current_ideas", [])
 
@@ -151,10 +151,10 @@ class Conversation:
         previous_responses = list(reversed(previous_responses))
 
         # Include n-3 round's current_ideas if available
-        if current_phase == "discussion" and n_minus_3_ideas:
+        if current_phase in ["discussion","direct_discussion"]  and n_minus_3_ideas:
             current_ideas_str = "\n".join(f"{i+1}. {idea}" for i, idea in enumerate(n_minus_3_ideas))
             previous_responses.insert(
-                0, f"The initial ideas under discussion before team feedback:\n{current_ideas_str if current_ideas_str else '(none)'}\n"
+                0, f"The initial ideas under discussion before team feedback:\n{current_ideas_str if current_ideas_str else '(none)'}"
             )
 
         return previous_responses
@@ -174,9 +174,10 @@ class Conversation:
                 'idea_index': idea_index if idea_index is not None else "N/A",
             }
 
-            if phase == "discussion" and current_ideas is not None:
+            if phase in ["discussion","direct_discussion"]  and current_ideas is not None:
                 entry['current_ideas'] = list(current_ideas)  # Store a copy of the current_ideas list
             self.chat_history.append(entry)
+            print(f"history:{entry}")
 
 
             # Update phase and overall token usage

@@ -245,7 +245,7 @@ class GenericDiscussionMode:
             self.conversation.current_agent= agent
             msgs= self.message_strategy.construct_messages(agent,'discussion',self.conversation,total_resp=total_resp)
             resp, prompt_tokens, completion_tokens = agent.generate_response(msgs)
-            self.conversation.add_chat_entry(agent.name, "\n".join(m['content'] for m in msgs), resp, 'discussion')
+            self.conversation.add_chat_entry(agent.name, "\n".join(m['content'] for m in msgs), resp, 'discussion',current_ideas=self.data_strategy.current_ideas)
 
             # Update token usage
             self.conversation.update_phase_token_usage("discussion",prompt_tokens, completion_tokens)
@@ -347,7 +347,7 @@ class GenericDiscussionMode:
                 self.conversation.current_agent= agent
                 msgs= self.message_strategy.construct_messages(agent,'discussion', self.conversation, idea_index=round_i,current_round=local_res + 1, max_rounds=10)
                 resp, prompt_tokens, completion_tokens = agent.generate_response(msgs)
-                self.conversation.add_chat_entry(agent.name, "\n".join(m['content'] for m in msgs), resp, 'discussion', round_i)
+                self.conversation.add_chat_entry(agent.name, "\n".join(m['content'] for m in msgs), resp, 'discussion', round_i,current_ideas=self.data_strategy.current_ideas)
 
                 # Update token usage
                 self.conversation.update_phase_token_usage("discussion",prompt_tokens, completion_tokens)
@@ -418,7 +418,7 @@ class GenericDiscussionMode:
                 self.conversation.current_agent= chosen
                 msgs= self.message_strategy.construct_messages(chosen,'discussion', self.conversation, r,current_round=local_res + 1, max_rounds=10)
                 resp, prompt_tokens, completion_tokens = chosen.generate_response(msgs)
-                self.conversation.add_chat_entry(chosen.name, "\n".join(m['content'] for m in msgs), resp, 'discussion', r)
+                self.conversation.add_chat_entry(chosen.name, "\n".join(m['content'] for m in msgs), resp, 'discussion', r,current_ideas=self.data_strategy.current_ideas)
 
                 # Update token usage
                 self.conversation.update_phase_token_usage("discussion",prompt_tokens, completion_tokens)
@@ -478,11 +478,11 @@ class GenericDiscussionMode:
             agent = self._select_next_agent(remain)
             self.conversation.current_agent = agent
 
-            msgs = self.message_strategy.construct_messages(agent, 'direct', self.conversation, total_resp=total_resp)
+            msgs = self.message_strategy.construct_messages(agent, 'direct_discussion', self.conversation, total_resp=total_resp)
             resp, prompt_tokens, completion_tokens = agent.generate_response(msgs)
             if total_resp == 0:
                 self.data_strategy.current_ideas = [resp]
-            self.conversation.add_chat_entry(agent.name, "\n".join(m["content"] for m in msgs), resp, "direct")
+            self.conversation.add_chat_entry(agent.name, "\n".join(m["content"] for m in msgs), resp, "direct_discussion",current_ideas=self.data_strategy.current_ideas)
 
             # Update token usage
             self.conversation.update_phase_token_usage("discussion",prompt_tokens, completion_tokens)
@@ -527,13 +527,13 @@ class GenericDiscussionMode:
                 self.conversation.current_agent = agent
 
                 msgs = self.message_strategy.construct_messages(
-                    agent, "direct", self.conversation, current_round=total_resp_per_idea + 1, idea_index = idea_idx
+                    agent, "direct_discussion", self.conversation, current_round=total_resp_per_idea + 1, idea_index = idea_idx
                 )
                 resp, prompt_tokens, completion_tokens = agent.generate_response(msgs)
                 if total_resp_per_idea == 0:
                     self.data_strategy.current_ideas = [resp]
                 self.conversation.add_chat_entry(
-                    agent.name, "\n".join(m["content"] for m in msgs), resp, "direct", idea_index=idea_idx
+                    agent.name, "\n".join(m["content"] for m in msgs), resp, "direct_discussion", idea_index=idea_idx,current_ideas=self.data_strategy.current_ideas
                 )
 
                 # Update token usage.
@@ -572,11 +572,11 @@ class GenericDiscussionMode:
                 break
             agent = self._select_next_agent(remain)
             self.conversation.current_agent = agent
-            msgs = self.message_strategy.construct_messages(agent, "direct", self.conversation, total_resp=total_resp)
+            msgs = self.message_strategy.construct_messages(agent, "direct_discussion", self.conversation, total_resp=total_resp)
             resp, prompt_tokens, completion_tokens = agent.generate_response(msgs)
             if total_resp == 0:
                 self.data_strategy.current_ideas = [resp]
-            self.conversation.add_chat_entry(agent.name, "\n".join(m["content"] for m in msgs), resp, "direct")
+            self.conversation.add_chat_entry(agent.name, "\n".join(m["content"] for m in msgs), resp, "direct_discussion",current_ideas=self.data_strategy.current_ideas)
             if total_resp != 0:
                 self.data_strategy.update_shared_data(self.conversation, resp)
             self.conversation.update_phase_token_usage("discussion",prompt_tokens, completion_tokens)

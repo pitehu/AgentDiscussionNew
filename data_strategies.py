@@ -19,23 +19,14 @@ class GenericDataStrategy:
         self.idea_scores = {}               # { idea_text: [scores] }
         self.ranked_ideas = []              # sorted by average
 
-        # For PS
-        # self.solution_candidates = []       # [{'solution': str, 'agent': str}, ...]
-        # self.solution_scores = {}           # { solution_text: [scores] }
-        # self.ranked_solutions = []
-
         # Discussion-time common
         self.current_ideas = []             # For all_at_once or one_by_one
         self.replacement_ideas = []         # For rating scenario (shared), or selectionTop scenario if you prefer
         self.left = []                      # leftover pool, used if we want to keep replacements at a certain size
-
-        # self.current_solution = None        # For PS (some code may just store it in current_ideas for uniform, but let's keep separate if we like)
-        # self.replacement_solutions = []
-        # self.left_solutions = []
+        self.replaced_ideas = []
 
         # For selectionTop:
         self.agent_selected_ideas = {}      # {agent_name: [ idx1, idx2 ... ] or direct text}
-        # self.agent_selected_solutions = {}  # {agent_name: [ idx1, idx2 ... ] or direct text}
 
         # agent_replacement_ideas: optional per-agent. We can do a dict if we want each agent own picks
         self.agent_replacement_ideas = {}   # {agent_name: [ "idea text", ... ] }
@@ -203,6 +194,12 @@ class GenericDataStrategy:
         # 2) if parse_result["If_agree"] == True => self._set_agent_agreed
         action_type = parse_result.action_type
         self.current_ideas = parse_result.current_ideas
+        replaced_ideas = parse_result.replaced_ideas
+
+        # Append replaced idea if applicable
+        if action_type == "replace" and replaced_ideas:
+            self.replaced_ideas.append(replaced_ideas)
+            print(self.replaced_ideas)
 
         # Phases-specific logic
         phases = self.task_config.get("phases", "three_stage")
@@ -281,7 +278,8 @@ class GenericDataStrategy:
         class AgentResponse(BaseModel):
             action_type: str  # "agree", "modify", or "replace"
             current_ideas: List[str]  
-            replacement_ideas: List[str]  
+            replacement_ideas: List[str]
+            replaced_ideas: str = None  
 
         # 1) figure out which replacement pool to display:
         sel_method = self.task_config.get("selection_method", "rating")
@@ -323,6 +321,7 @@ class GenericDataStrategy:
                 - Update the `current_ideas` list by replacing the specified idea with the selected idea from the `replacement_ideas` list.
                 - Remove the selected replacement idea from the `replacement_ideas` list.
                 - Ensure the updated `replacement_ideas` list does not include the replaced idea.
+                - Discard the replaced idea and move it to the `replaced_ideas` list for record-keeping.
         **Important**:
             - The `current_ideas` list must only include **one idea** (the idea being discussed).
             - The `replacement_ideas` list must reflect the updated pool after any replacements.
@@ -332,7 +331,8 @@ class GenericDataStrategy:
         {{
             "action_type": "agree/modify/replace",
             "current_ideas": [],
-            "replacement_ideas": []
+            "replacement_ideas": [],
+            "replaced_ideas": [],
         }}
         """.strip()
 
@@ -352,6 +352,7 @@ class GenericDataStrategy:
             action_type: str  # "agree" or "adjust"
             current_ideas: List[str]  # Updated list of current ideas (always 5 items)
             replacement_ideas: List[str]  # Updated replacement pool after adjustments
+            replaced_ideas: str = None
 
         # 1) figure out which replacement pool to display:
         sel_method = self.task_config.get("selection_method", "rating")
@@ -389,7 +390,7 @@ class GenericDataStrategy:
         - **Replace**: 
             1. Replace the idea in `current_ideas` with the selected replacement idea.
             2. Remove the used replacement idea from the replacement_ideas pool to ensure it’s no longer available for further use.
-            3. Discard the replaced idea. 
+            3. Discard the replaced idea and move it to the `replaced_ideas` list for record-keeping.
 
         Ensure the `current_ideas` list always contains exactly 5 ideas after adjustments.
 
@@ -397,7 +398,8 @@ class GenericDataStrategy:
         {{
             "action_type": "agree" or "adjust",
             "current_ideas": ["idea1", "idea2", "idea3", "idea4", "idea5"],
-            "replacement_ideas": ["idea6", "idea7", ...]
+            "replacement_ideas": ["idea6", "idea7", ...],
+            "replaced_ideas": ["idea1", "idea2",...]
         }}
         """.strip()
 
@@ -436,7 +438,7 @@ class GenericDataStrategy:
                 else:
                     raise ValueError("Incomplete data in parsed response for direct_discussion.")
             else:
-                if hasattr(data, 'action_type') and hasattr(data, 'current_ideas') and hasattr(data, 'replacement_ideas'):
+                if hasattr(data, 'action_type') and hasattr(data, 'current_ideas') and hasattr(data, 'replacement_ideas') and hasattr(data, 'replaced_ideas'):
                     return data, prompt_tokens, completion_tokens
                 else:
                     raise ValueError("Incomplete data in parsed response for three_stage.")
@@ -501,7 +503,9 @@ class GenericDataStrategy:
         """
         class AgentResponse(BaseModel):
             action_type: str  # "agree", "modify", or "replace"
-            current_ideas: List[str]  
+            current_ideas: List[str]
+            replaced_ideas: str = None  
+
 
         current_str = "\n".join(f"- {idea}" for idea in self.current_ideas)
 
@@ -516,12 +520,13 @@ class GenericDataStrategy:
         Updates to apply:
         1. **Agree**: Keep the `current_ideas` list unchanged.
         2. **Modify**: Update the `current_ideas` list with the modified idea, do not include the reason.
-        3. **Replace**: Replace the idea in `current_ideas` with the proposed new idea. Ensure the updated `current_ideas` list contains exactly one idea.
+        3. **Replace**: Replace the idea in `current_ideas` with the proposed new idea. Ensure the updated `current_ideas` list contains exactly one idea. Discard the replaced idea and move it to the `replaced_ideas` list for record-keeping.
 
         Expected output JSON:
         {{
             "action_type": "agree/modify/replace",
             "current_ideas": ["idea1"]
+            "replaced_ideas": ["idea1", "idea2",...]
         }}
         """.strip()
 
