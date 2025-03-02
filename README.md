@@ -42,11 +42,11 @@
    - Contains predefined task requirements and prompts used throughout the discussion.  
 
 10. **`roles.py`**  
-   - Defines system and user roles, including default configurations for agents.  
+      - Defines system and user roles, including default configurations for agents.  
 
 11. **`utils.py`**  
-   - Provides helper functions for token calculation, data formatting, and parsing.  
+      - Provides helper functions for token calculation, data formatting, and parsing.  
 
 12. **`main.py`**  
-   - The entry point for running the system.  
-   - Loads configurations, initializes agents, and executes the discussion process.  
+      - The entry point for running the system.  
+      - Loads configurations, initializes agents, and executes the discussion process.  
