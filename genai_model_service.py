@@ -8,7 +8,7 @@ class GeminiModelService(BaseModelService):
     Model service for interacting with Google's Gemini API.
     """
     def __init__(self):
-        self.client = genai.Client(api_key="AIzaSyDyg6V00aMA-5BPILrnjrG33Um-a9cxnlY")
+        self.client = genai.Client(api_key="")
 
     def generate_response(self, messages, model="gemini-2.0-flash-thinking-exp",temperature=0.7):
         """

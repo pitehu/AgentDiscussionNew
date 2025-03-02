@@ -8,7 +8,7 @@ class DeepSeekModelService(BaseModelService):
     Model service for interacting with Together AI.
     """
     def __init__(self):
-        self.client = Together(api_key = 'tgp_v1_8NILfECFUm331WsMBSH5_Lerhy3sevt80Kv2ecX0nIU')
+        self.client = Together(api_key = '')
 
     def generate_response(self, messages, model=None, temperature=0.6):
         """
