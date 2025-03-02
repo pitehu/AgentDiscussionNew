@@ -3,11 +3,11 @@
 import re
 import json
 import logging
-from config import OPENAI_API_KEY
 from pydantic import BaseModel
 from openai import OpenAI
 from typing import List
 from utils import calculate_tokens
+from azure_model_service import AzureModelService
 
 class GenericDataStrategy:
     def __init__(self, task_config):
@@ -39,6 +39,8 @@ class GenericDataStrategy:
         self.current_idea_index = 0
         self.first_agent_name = None
 
+        self.model_service = AzureModelService()
+
 
     # ------------------ Idea Generation ------------------
     def collect_ideas(self, agent_name, agent_response):
@@ -47,12 +49,27 @@ class GenericDataStrategy:
             self.all_ideas.append({'idea': l, 'agent': agent_name})
 
     def _extract_lines(self, text):
-        results=[]
+        results = []
+        current_idea = []
+        
         for line in text.strip().split('\n'):
-            line=line.strip('-*•12345. ').strip()
-            if line:
-                results.append(line)
+            stripped_line = line.strip()
+
+            if re.match(r"^(?:-\s*)?(?:\*\*)?[1-9]\d*\.(?:\*\*)?\s", stripped_line):
+                if current_idea:
+                    results.append(" ".join(current_idea).strip())
+                    current_idea = []
+                
+                stripped_line = re.sub(r"^(?:-\s*)?(?:\*\*)?[1-9]\d*\.(?:\*\*)?\s", "", stripped_line).strip()
+            
+            if stripped_line:
+                current_idea.append(stripped_line)
+    
+        if current_idea:
+            results.append(" ".join(current_idea).strip())
+
         return results
+
 
     # ------------------ Selection Phase ------------------
     def collect_scores(self, agent_name, agent_response):
@@ -70,7 +87,7 @@ class GenericDataStrategy:
         """
         parse 'Idea X: Y' or 'Solution X: Y' => { (X-1): Y }
         """
-        pattern= r'(?:Idea)?\s+(\d+)\s*:\s*(\d+)'
+        pattern = r'(?:Idea\s*)?(\d+)[\s:\-]+(\d+)'
         out={}
         for line in text.split('\n'):
             line=line.strip()
@@ -102,6 +119,7 @@ class GenericDataStrategy:
             )
             conversation.add_chat_entry(
                 agent_name="System",
+                agent_model_name = 'System',
                 prompt="Ranking ideas based on average scores.",
                 response=f"Ranked Ideas:\n{rank_summary}",
                 phase="other",
@@ -186,10 +204,10 @@ class GenericDataStrategy:
 
         # 1) use GPT to interprete agent_response =>  "If_agree", "current_ideas", "replacement_ideas"
         # Call the parsing function
-        parse_result, prompt_tokens, completion_tokens = self._parse_agent_response_with_gpt(agent_response, agent_name)
+        parse_result, prompt_tokens, completion_tokens,reasoning_tokens = self._parse_agent_response_with_gpt(agent_response, agent_name)
 
         # Update token usage in the conversation
-        conversation.update_phase_token_usage("other",prompt_tokens, completion_tokens)
+        conversation.update_phase_token_usage("other",prompt_tokens, completion_tokens,reasoning_tokens)
 
         # 2) if parse_result["If_agree"] == True => self._set_agent_agreed
         action_type = parse_result.action_type
@@ -313,7 +331,7 @@ class GenericDataStrategy:
             - The `replacement_ideas` list also remains unchanged.
 
         2. **Modify**:
-            - If the agent modifies an idea, update the `current_ideas` list with the modified version of the idea, do not include the reason.
+            - If the agent modifies an idea, update the `current_ideas` list with the modified version of the idea.
             - The `replacement_ideas` list remains unchanged.
 
         3. **Replace**:
@@ -416,30 +434,24 @@ class GenericDataStrategy:
         Sends messages to GPT and parses the response using the given response model.
         """
         model = "gpt-4o"
-        prompt_tokens = calculate_tokens(messages, model=model)
-
         phases = self.task_config.get("phases", "three_stage")
 
-        client = OpenAI(api_key = OPENAI_API_KEY)
-
         try:
-            response = client.beta.chat.completions.parse(
-                model=model,
-                messages=messages,
-                response_format=response_model
-            )
+            response = self.model_service.parse_response(messages, model=model, response_model=response_model)
             data = response.choices[0].message.parsed
             print(data)
-            completion_tokens = calculate_tokens([data], model=model)
+            prompt_tokens = response.usage.prompt_tokens
+            completion_tokens = response.usage.completion_tokens
+            reasoning_tokens = 0
             
             if phases == "direct_discussion":
                 if hasattr(data, 'action_type') and hasattr(data, 'current_ideas'):
-                    return data, prompt_tokens, completion_tokens
+                    return data, prompt_tokens, completion_tokens,reasoning_tokens
                 else:
                     raise ValueError("Incomplete data in parsed response for direct_discussion.")
             else:
                 if hasattr(data, 'action_type') and hasattr(data, 'current_ideas') and hasattr(data, 'replacement_ideas') and hasattr(data, 'replaced_ideas'):
-                    return data, prompt_tokens, completion_tokens
+                    return data, prompt_tokens, completion_tokens,reasoning_tokens
                 else:
                     raise ValueError("Incomplete data in parsed response for three_stage.")
         except Exception as e:
@@ -450,7 +462,7 @@ class GenericDataStrategy:
             }
             if phases != "direct_discussion":
                 fallback_data["replacement_ideas"] = self.replacement_ideas
-            return fallback_data, prompt_tokens, 0
+            return fallback_data, prompt_tokens, 0, 0
 
     def _parse_direct_all_at_once_response(self, agent_response, agent_name):
         """
@@ -518,8 +530,8 @@ class GenericDataStrategy:
         - **Replaces** Propose a **new idea** to replace the current idea. "Replace: [new idea] - Reason: [specific reason]"
 
         Updates to apply:
-        1. **Agree**: Keep the `current_ideas` list unchanged.
-        2. **Modify**: Update the `current_ideas` list with the modified idea, do not include the reason.
+        1. **Agree**: Keep the `current_ideas` unchanged.
+        2. **Modify**: URevise the `current_ideas` by incorporating the proposed modifications, ensuring the updated version accurately reflects the changes.
         3. **Replace**: Replace the idea in `current_ideas` with the proposed new idea. Ensure the updated `current_ideas` list contains exactly one idea. Discard the replaced idea and move it to the `replaced_ideas` list for record-keeping.
 
         Expected output JSON:

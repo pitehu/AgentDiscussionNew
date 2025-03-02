@@ -11,15 +11,28 @@ class GenericMessageStrategy:
 
     def construct_messages(self, agent, phase, conversation, idea_index=None,total_resp=None,current_round=None, max_rounds=None, include_intention_prompt=False):
         msgs=[]
-        msgs.append({"role":"system","content": f"# **Role**\n{agent.system_message}"})
+        single_llm_mode = len(conversation.agents) == 1 and not agent.system_message  # Check for single LLM and no persona
+        persona_type =  self.task_config.get("persona_type", "none")
+        model = agent.model_name  # Fetch the correct model for each agent
+        role = (
+            # "developer" if model in ['o3-mini','o1'] else
+            "user" if model in ['o3-mini','o1','o1-mini',"deepseek-ai/DeepSeek-R1","gemini-2.0-flash-thinking-exp"] else
+            "system"
+        )
 
+        # Add role description unless it's a single LLM mode
+        if not single_llm_mode and persona_type !='none':
+            msgs.append({"role": role, "content": f"# **Role**\n{agent.system_message}"})
         # Overall
         if self.task_config.get("task_type","AUT")=="AUT":
-            msgs.append({"role":"system","content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['AUT_Mode1_Overall'].strip()}"})
+            msgs.append({"role":role,"content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['AUT_Mode1_Overall'].strip()}"})
         else:
-            msgs.append({"role":"system","content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['PS_Overall'].strip()}"})
+            msgs.append({"role":role,"content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['PS_Overall'].strip()}"})
 
-        if phase=="idea_generation":
+        # Adjust content based on phase and task configuration
+        if single_llm_mode:
+            self._add_single_llm_instructions(msgs, agent, conversation)
+        elif phase=="idea_generation":
             self._add_generation_instructions(msgs, agent, conversation)
         elif phase=="selection":
             self._add_selection_instructions(msgs, agent, conversation)
@@ -38,6 +51,14 @@ class GenericMessageStrategy:
                 msgs.append({"role": "user", "content": "\n\n"+intention_prompt.strip()})
 
         return msgs
+    
+    def _add_single_llm_instructions(self, msgs, agent, conversation):
+        """
+        Add instructions specifically tailored for a single LLM scenario.
+        """
+        # This could be dynamic based on some specific task requirements defined elsewhere or simplified
+        task_requirement = TASK_REQUIREMENTS['PS_Overall_Single']
+        msgs.append({"role": "user", "content": f"# **Task Requirement**\n{task_requirement}"})
 
     def _add_generation_instructions(self, msgs, agent, conversation):
         """
@@ -82,14 +103,14 @@ class GenericMessageStrategy:
 
         if ttype=="AUT":
             if sel_method=="rating":
-                msgs.append({"role":"user","content": f"# **Current Task**\n{TASK_REQUIREMENTS['AUT_Mode1_Selection_Rating'].strip()}"})
+                msgs.append({"role":"user","content": f"\n# **Current Task**\n{TASK_REQUIREMENTS['AUT_Mode1_Selection_Rating'].strip()}"})
             else:
-                msgs.append({"role":"user","content": f"# **Current Task**\n{TASK_REQUIREMENTS['AUT_Mode1_Selection_SelectionTop'].strip()}"})
+                msgs.append({"role":"user","content": f"\n# **Current Task**\n{TASK_REQUIREMENTS['AUT_Mode1_Selection_SelectionTop'].strip()}"})
         else:
             if sel_method=="rating":
-                msgs.append({"role":"user","content": f"# **Current Task**\n{TASK_REQUIREMENTS['PS_Selection_Rating'].strip()}"})
+                msgs.append({"role":"user","content": f"\n# **Current Task**\n{TASK_REQUIREMENTS['PS_Selection_Rating'].strip()}"})
             else:
-                msgs.append({"role":"user","content": f"# **Current Task**\n{TASK_REQUIREMENTS['PS_Selection_SelectionTop'].strip()}"})
+                msgs.append({"role":"user","content": f"\n# **Current Task**\n{TASK_REQUIREMENTS['PS_Selection_SelectionTop'].strip()}"})
 
     def _add_discussion_instructions(self, msgs, agent, conversation, idea_index, total_resp=None, current_round=None, max_rounds=None):
         """
@@ -99,6 +120,14 @@ class GenericMessageStrategy:
         task_type = self.task_config.get("task_type", "AUT")
         disc_method = self.task_config.get("discussion_method", "all_at_once")
         sel_method = self.task_config.get("selection_method", "rating")
+        # model = self.task_config.get("model", "gpt-4o")
+        model = agent.model_name  # Fetch the correct model for each agent
+        print(model)
+        role = (
+            # "developer" if model in ['o3-mini','o1'] else
+            "user" if model in ['o3-mini','o1','o1-mini',"deepseek-ai/DeepSeek-R1","gemini-2.0-flash-thinking-exp"] else
+            "system"
+        )
 
         # Fetch and format previous responses
         previous_responses = conversation.get_previous_responses(idea_index if disc_method == "one_by_one" else None,current_phase="discussion")
@@ -132,11 +161,12 @@ class GenericMessageStrategy:
             else:
                 prompt = TASK_REQUIREMENTS["PS_Discussion_SelectionTop"]
             prompt = (
-                    prompt.replace("{{total_resp}}", str(total_resp or 0 + 1))
+                    prompt.replace("{{total_resp}}", str(total_resp + 1))
                 )
 
         # Display task-specific prompt first
-        msgs.append({"role": "system", "content": f"\n# **Current Task**\n {prompt.strip()}"})
+        
+        msgs.append({"role": role, "content": f"\n# **Current Task**\n{prompt.strip()}"})
 
         # Insert previous responses before current and replacement ideas
         msgs.append({"role": "user", "content": "\n# **Disucssion History**\nBelow is the discussion history for the past three rounds. Other team members' feedback on these ideas so far (last 3 responses, in chronological order):\n" + history_str +"\n"})
@@ -144,12 +174,11 @@ class GenericMessageStrategy:
         current_ideas_str = "\n".join(f"{i+1}. {txt}" for i, txt in enumerate(self.data_strategy.current_ideas))
         replacement_ideas_str = self.get_replacement_ideas_str(agent, sel_method)
 
-        # 仅在 replaced_ideas 存在时拼接对应部分
         if self.data_strategy.replaced_ideas:
             replaced_ideas_str = "\n".join(f"{i+1}. {idea}" for i, idea in enumerate(self.data_strategy.replaced_ideas))
             replaced_ideas_section = f"\n**Previously Replaced Ideas:**\n{replaced_ideas_str}"
         else:
-            replaced_ideas_section = ""  # 不添加该部分
+            replaced_ideas_section = ""  
 
         # Append structured message with Markdown formatting
         msgs.append({"role": "user", "content": 
@@ -159,7 +188,7 @@ class GenericMessageStrategy:
             
             "**Replacement Ideas (yours):**\n"
             f"{replacement_ideas_str if replacement_ideas_str else '(None)'}"
-            f"{replaced_ideas_section}"  # 只有在 replaced_ideas 存在时才添加
+            f"{replaced_ideas_section}" 
         })
 
     
@@ -180,6 +209,12 @@ class GenericMessageStrategy:
         """
         task_type = self.task_config.get("task_type", "AUT")
         discussion_method = self.task_config.get("discussion_method", "all_at_once")
+        model = agent.model_name  # Fetch the correct model for each agent
+        role = (
+            # "developer" if model in ['o3-mini','o1'] else
+            "user" if model in ['o3-mini','o1','o1-mini',"deepseek-ai/DeepSeek-R1","gemini-2.0-flash-thinking-exp"] else
+            "system"
+        )
 
         if total_resp == 0 or current_round == 1:
         # First round: Initial idea generation
@@ -204,6 +239,10 @@ class GenericMessageStrategy:
                         
                 )
             else:  # PS
+                # if current_round <=10 :
+                #     prompt = TASK_REQUIREMENTS["PS_Direct_Discussion_AllAtOnce_First"]
+                # elif current_round > 10:
+                #     prompt = TASK_REQUIREMENTS["PS_Direct_Discussion_AllAtOnce_Other"]
                 prompt = TASK_REQUIREMENTS["PS_Direct_Discussion_AllAtOnce"]
                 prompt = prompt.replace("{{total_resp}}", str(total_resp + 1))
 
@@ -214,7 +253,7 @@ class GenericMessageStrategy:
         history_str = "\n".join(previous_responses) if previous_responses else "No previous responses."
 
         # Construct message content
-        msgs.append({"role": "system", "content": f"\n# **Current Task**\n{prompt.strip()}"})
+        msgs.append({"role": role, "content": f"\n# **Current Task**\n{prompt.strip()}"})
         msgs.append({"role": "user", "content": f"\n# **Disucssion History**\nBelow is the discussion history for the past three rounds. Other team members' feedback on these ideas so far (last 3 responses, in chronological order): \n\n{history_str}"})
 
         # Add current and replacement ideas

@@ -119,30 +119,58 @@ AUT_MODE1_DISCUSSION_SELECTIONTOP_ONEBYONE = """
 """
 
 # ========== Problem Solving ========== #
+PS_OVERALL_Single = """
+Task: Global warming, which refers to the ongoing increase in global average temperature, has an increasingly large impact on the environment. Please come up with one creative idea to slow global warming. 
+Your answers will be evaluated on its creativity (i.e., it should be both novel and useful).
+The idea should be around 80-100 words.
+"""
+
 PS_OVERALL = """
-Task: You are collaborating with two other team members to come up with one creative idea for a problem: Employees’ wellbeing is considered one of the top workforce concerns. Please come up with one creative idea for companies to support employees’ wellbeing.  
+Task: Global warming, which refers to the ongoing increase in global average temperature, has an increasingly large impact on the environment. You are collaborating with two other team members to come up with one creative idea to slow global warming.
 Your answers will be evaluated on its creativity (i.e., it should be both novel and useful).
 """
 
 PS_GENERATION = """
+Think like a 24-year-old White female with a graduate degree in business and management, who works as a management consultant in a consulting firm, with the following personality profile according to the Big Five model (all personality scales range from 1 to 5, where 1 indicates a low score and 5 indicates a high score): Openness to Experience 3.7, Conscientiousness 3.5, Extraversion 3.0, Agreeableness 3.8, and Neuroticism 2.7. 
+
 - Please propose 3 possible ideas for the problem.
-- Each idea should be within 100 words and should not include explanation.
+- Each idea should be around 80-100 words.
 - List each idea on a separate line.
+- For example:
+  1. [Idea 1]
+  2. [Idea 2]
+  3. [Idea 3]
 """
 
 PS_GENERATION_DEPENDENT = """
+Think like a 24-year-old White female with a graduate degree in business and management, who works as a management consultant in a consulting firm, with the following personality profile according to the Big Five model (all personality scales range from 1 to 5, where 1 indicates a low score and 5 indicates a high score): Openness to Experience 3.7, Conscientiousness 3.5, Extraversion 3.0, Agreeableness 3.8, and Neuroticism 2.7. 
+
 - Please propose 3 additional ideas for the problem that are different from the previous ideas.
-- Each idea should be within 100 words and should not include explanation.
+- Each idea should be around 80-100 words.
 - List each idea on a separate line.
+- For example:
+  1. [Idea 1]
+  2. [Idea 2]
+  3. [Idea 3]
 """
 
 PS_SELECTION_RATING = """
-- Below is the list of all proposed ideas.
+Think like a 24-year-old White female with a graduate degree in business and management, who works as a management consultant in a consulting firm, with the following personality profile according to the Big Five model (all personality scales range from 1 to 5, where 1 indicates a low score and 5 indicates a high score): Openness to Experience 3.7, Conscientiousness 3.5, Extraversion 3.0, Agreeableness 3.8, and Neuroticism 2.7. 
+
+- Below is the list of 9 proposed ideas.
 - Please rate **each and every idea** on on its creativity (i.e., novelty and usefulness), using a scale from 1 to 10. 
 - Avoid giving the same score to multiple ideas unless absolutely necessary. 
-- Provide your scores in the format 'Idea X: Y'.
+- Provide ONLY your scores in the exact format: 'Idea X: Y', without any additional explanation:
+  - **X** is the idea number (e.g., 1, 2, 3...).
+  - **Y** is the creativity score (1 to 10).
+- For example:
+  Idea 1: 8
+  Idea 2: 7
+  Idea 3: 9
 - Ensure that the scores span a wide range to reflect varying levels of creativity.
 """
+# - Below is the list of all proposed ideas.
+#- You MUST provide your scores in the exact format: **'Idea X: Y'**, where:
 
 PS_SELECTION_SELECTIONTOP = """
 - Please review all the ideas listed below.
@@ -151,15 +179,19 @@ PS_SELECTION_SELECTIONTOP = """
 """
 
 PS_DISCUSSION_RATING = """
+Think like a 24-year-old White female with a graduate degree in business and management, who works as a management consultant in a consulting firm, with the following personality profile according to the Big Five model (all personality scales range from 1 to 5, where 1 indicates a low score and 5 indicates a high score): Openness to Experience 3.7, Conscientiousness 3.5, Extraversion 3.0, Agreeableness 3.8, and Neuroticism 2.7. 
+
 - You are reviewing the current top idea. 
 - Your team has a maximum of 20 rounds to finalize the list of ideas. You are currently on round {{total_resp}}.
 
 - Actions you can take for the idea:
-  - **Agree:** If the idea meets the task objective and does not require changes, reply "Agree: No changes needed."
-  - **Modify:** If the idea is aligned with the task objective but needs improvement, propose modification. Use this format:
+  - **Agree:** If the current idea is extremely creative and you cannot come up with a more creative idea, reply "Agree: No changes needed."
+  - **Modify:** If the idea is moderately creative and could use improvement, propose modification. Use this format:
     "Modify: [idea after modification] - Reason: [specific reason for improvement]."
   - **Replace:** If the idea is not creative or not aligned with the task objective, replace it with one from the shared replacement pool of top ideas. Use this format:
     "Replace: [replacement idea] - Reason: [specific reason for replacement]."
+
+- Each idea should be around 80-100 words.
 """
 
 PS_DISCUSSION_RATING_PRE = """
@@ -172,6 +204,8 @@ PS_DISCUSSION_RATING_PRE = """
     "Modify: [idea after modification] - Reason: [specific reason for improvement]."
   - **Replace:** If the idea is not creative or not aligned with the task objective, replace it with one from the shared replacement pool of top ideas. Use this format:
     "Replace: [replacement idea] - Reason: [specific reason for replacement]."
+  
+- Each idea should be around 80-100 words.
 """
 
 PS_DISCUSSION_SELECTIONTOP = """
@@ -250,10 +284,10 @@ AUT_DIRECT_DISCUSSION_ONE_BY_ONE = """
 
 PS_DIRECT_FIRST_ROUND_ALL_AT_ONCE = """
 - You are initiating the discussion for a collaborative task. Please propose an idea for the problem.
-- The idea should be within 100 words and should not include explanation.
+- The idea should be around 80-100 words.
 """
 
-PS_DIRECT_DISCUSSION_ALL_AT_ONCE = """
+PS_DIRECT_DISCUSSION_ALL_AT_ONCE_Pre = """
 - You are reviewing the current idea. 
 - Your team has a maximum of 30 rounds to finalize the list of ideas. You are currently on round {{total_resp}}.
 - Please be mindful that your team has limited rounds to finalize the idea.
@@ -265,6 +299,46 @@ PS_DIRECT_DISCUSSION_ALL_AT_ONCE = """
   - **Replace:** If the idea is not creative or not aligned with the task objective, propose a new idea to replace the current one. Use this format:
     "Replace: [replacement idea] - Reason: [specific reason for replacement]."
 """
+
+PS_DIRECT_DISCUSSION_ALL_AT_ONCE = """
+- You are reviewing the current idea. 
+- Your team has a maximum of 30 rounds to finalize the list of ideas. You are currently on round {{total_resp}}.
+- Please be mindful that your team has limited rounds to finalize the idea.
+
+- Actions you can take for the idea:
+  - **Agree:** If the current idea is extremely creative and you cannot come up with a more creative idea, reply "Agree: No changes needed."
+  - **Modify:** If the idea is moderately creative and could use improvement, propose modification. Use this format:
+    "Modify: [idea after modification] - Reason: [specific reason for improvement]."
+  - **Replace:** If the idea is not creative or not aligned with the task objective, propose a new idea to replace the current one. Use this format:
+    "Replace: [replacement idea] - Reason: [specific reason for replacement]."
+"""
+
+PS_DIRECT_DISCUSSION_ALL_AT_ONCE_RESTRICTION_FIRST = """
+- You are reviewing the current idea. 
+- Your team has a maximum of 30 rounds to finalize the list of ideas. You are currently on round {{total_resp}}.
+- Please be mindful that your team has limited rounds to finalize the idea.
+
+- Actions you can take for the idea:
+  - **Modify:** If the idea is moderately creative and could use improvement, propose modification. Use this format:
+    "Modify: [idea after modification] - Reason: [specific reason for improvement]."
+  - **Replace:** If the idea is not creative or not aligned with the task objective, propose a new idea to replace the current one. Use this format:
+    "Replace: [replacement idea] - Reason: [specific reason for replacement]."
+"""
+
+PS_DIRECT_DISCUSSION_ALL_AT_ONCE_RESTRICTION_OTHER = """
+- You are reviewing the current idea. 
+- Your team has a maximum of 30 rounds to finalize the list of ideas. You are currently on round {{total_resp}}.
+- Please be mindful that your team has limited rounds to finalize the idea.
+
+- Actions you can take for the idea:
+  - **Agree:** If the current idea is extremely creative and you cannot come up with a more creative idea, reply "Agree: No changes needed."
+  - **Modify:** If the idea is moderately creative and could use improvement, propose modification. Use this format:
+    "Modify: [idea after modification] - Reason: [specific reason for improvement]."
+  - **Replace:** If the idea is not creative or not aligned with the task objective, propose a new idea to replace the current one. Use this format:
+    "Replace: [replacement idea] - Reason: [specific reason for replacement]."
+"""
+
+
 
 # ========== Raising hands ========== #
 INTENTION_PROMPT_IDEAS = """
@@ -291,6 +365,7 @@ TASK_REQUIREMENTS = {
     "AUT_Mode1_Discussion_Rating_OneByOne": AUT_MODE1_DISCUSSION_RATING_ONEBYONE,
     "AUT_Mode1_Discussion_SelectionTop_OneByOne": AUT_MODE1_DISCUSSION_SELECTIONTOP_ONEBYONE,
 
+    "PS_Overall_Single": PS_OVERALL_Single,
     "PS_Overall": PS_OVERALL,
     "PS_Generation": PS_GENERATION,
     "PS_Generation_Dependent": PS_GENERATION_DEPENDENT,
@@ -305,6 +380,8 @@ TASK_REQUIREMENTS = {
     "AUT_Direct_Discussion_OneByOne":AUT_DIRECT_DISCUSSION_ONE_BY_ONE,
     "PS_Direct_First_Round_AllAtOnce":PS_DIRECT_FIRST_ROUND_ALL_AT_ONCE,
     "PS_Direct_Discussion_AllAtOnce":PS_DIRECT_DISCUSSION_ALL_AT_ONCE,
+    "PS_Direct_Discussion_AllAtOnce_First":PS_DIRECT_DISCUSSION_ALL_AT_ONCE_RESTRICTION_FIRST,
+    "PS_Direct_Discussion_AllAtOnce_Other":PS_DIRECT_DISCUSSION_ALL_AT_ONCE_RESTRICTION_OTHER,
 
     "Intention_Prompt_Ideas": INTENTION_PROMPT_IDEAS,
     "Intention_Prompt_Idea": INTENTION_PROMPT_IDEA

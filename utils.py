@@ -1,32 +1,41 @@
 # utils.py
 
+import tiktoken
 from tiktoken import encoding_for_model
+import transformers
 
 def calculate_tokens(messages, model="gpt-4o"):
     """
     Calculate the number of tokens used in a list of messages or parsed content.
     Each input should be a dictionary with 'role' and 'content', or a parsed object.
     """
-    encoding = encoding_for_model(model)
+    if model.startswith("deepseek"):
+        tokenizer = transformers.AutoTokenizer.from_pretrained("deepseek-ai/deepseek-tokenizer", trust_remote_code=True)
+    elif model in ['o1-mini', 'o3-mini']:
+        encoding = tiktoken.get_encoding("cl100k_base")  # Compatible encoding
+    else:
+        encoding = encoding_for_model(model)
     token_count = 0
 
     for msg in messages:
         if isinstance(msg, dict) and "content" in msg:
-            # Handle message format with role and content
-            token_count += len(encoding.encode(msg["content"]))
+            content = msg["content"]
         elif isinstance(msg, str):
-            # Handle plain string
-            token_count += len(encoding.encode(msg))
+            content = msg
         else:
-            # Handle parsed object by converting it to JSON string
             from pydantic import BaseModel
             if isinstance(msg, BaseModel):
-                token_count += len(encoding.encode(msg.json()))
+                content = msg.json()
             elif isinstance(msg, dict):
                 import json
-                token_count += len(encoding.encode(json.dumps(msg)))
+                content = json.dumps(msg)
             else:
                 raise ValueError("Unsupported message format for token calculation.")
+
+        if model.startswith("deepseek"):
+            token_count += len(tokenizer.encode(content))
+        else:
+            token_count += len(encoding.encode(content))
 
     return token_count
 
