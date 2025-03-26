@@ -118,8 +118,8 @@ class GenericDataStrategy:
                 [f"Rank {i+1}: {idea} (Avg Score: {avg:.2f})" for i, (idea, avg) in enumerate(items)]
             )
             conversation.add_chat_entry(
-                agent_name="System",
-                agent_model_name = 'System',
+                model_name="System",
+                agent_name='System',
                 prompt="Ranking ideas based on average scores.",
                 response=f"Ranked Ideas:\n{rank_summary}",
                 phase="other",
@@ -246,7 +246,8 @@ class GenericDataStrategy:
                     if ttype == "AUT":
                         desired_size = 5
                     else:
-                        desired_size = 3
+                        # PS branch: use config option (default: 3)
+                        desired_size = self.task_config.get("replacement_pool_size", 3)
                     if len(self.replacement_ideas) < desired_size and self.left:
                         gap = desired_size - len(self.replacement_ideas)
                         for _ in range(gap):

@@ -9,7 +9,7 @@ from message_strategies import GenericMessageStrategy
 from discussion_modes import GenericDiscussionMode
 import logging
 
-def main(llm_count=1, persona_type=None, phases="direct_discussion", generation_method="dependent"):
+def main(llm_count=1, persona_type=None, phases="three_stage", generation_method="dependent"):
     try:
         if persona_type == 'none':
             system_messages = [""] * llm_count
@@ -48,12 +48,13 @@ def main(llm_count=1, persona_type=None, phases="direct_discussion", generation_
             "phases": phases,          # "three_stage" or "direct_discussion"
             "generation_method": generation_method, # "independent" or "dependent"
             "selection_method": "rating", # "selectionTop" or "rating"
-            "discussion_method": "all_at_once",  # "all_at_once" or "one_by_one"
+            "discussion_method": "iterative_refinement",  # "all_at_once" or "one_by_one", "open", or "iterative_refinement"
             "discussion_order_method": "fixed",  # "fixed" or "random" or "hand_raising"
             "persona_type":persona_type,
             "llm_count":llm_count,
             "model":DEFAULT_MODEL,
-            "temperature":DEFAULT_TEMPERATURE
+            "temperature":DEFAULT_TEMPERATURE,
+            "replacement_pool_size": 0
 
         }
         data_strategy = GenericDataStrategy(task_config=task_config)
@@ -71,7 +72,7 @@ def main(llm_count=1, persona_type=None, phases="direct_discussion", generation_
             conversation.save_chat_history()
 
 
-# if __name__ == "__main__":
-#     # Default: False (set to True for debugging) 
-#     main(llm_count=3, persona_type="same")
+if __name__ == "__main__":
+    # Default: False (set to True for debugging) 
+    main(llm_count=3, persona_type="same")
 

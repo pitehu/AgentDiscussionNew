@@ -103,84 +103,91 @@ class Conversation:
         previous_responses = []
         n_minus_3_ideas = None
 
+        # Include entries that match the given current_phase, including "open_discussion".
         filtered_history = [entry for entry in self.chat_history if not current_phase or entry["phase"] == current_phase]
         chat_length = len(filtered_history)
         llm_count = self.task_config.get("llm_count", "none")
 
-        if current_phase in ["discussion", "direct_discussion"]:
-            # Extract n_minus_3_ideas with different conditions for discussion and direct_discussion
+        # Update condition to include open_discussion.
+        if current_phase in ["discussion", "direct_discussion", "open_discussion"]:
+            # Extract n_minus_3_ideas with different conditions for discussion/direct_discussion/open_discussion
             if current_phase == "direct_discussion":
-                if chat_length < 5:
-                    target_index = 0  # For less than 5 entries, use the last one
-                else:
-                    target_index = chat_length - 3  # For 5 or more entries, use the 4th from the end
-            elif current_phase == "discussion":
-                if chat_length < 4:
-                    target_index = 0  # For less than 4 entries, use the last one
-                else:
-                    target_index = chat_length - 3  # For 4 or more entries, use the 4th from the end
-
+                target_index = 0 if chat_length < 5 else chat_length - 3
+            elif current_phase in ["discussion", "open_discussion"]:
+                target_index = 0 if chat_length < 4 else chat_length - 3
             if 0 <= target_index < chat_length:
                 n_minus_3_ideas = filtered_history[target_index].get("current_ideas", [])
 
-            # Extract previous_responses based on phase conditions
         if current_phase == "direct_discussion":
-            # For direct_discussion, skip the oldest entry and get the latest 3
             history_to_use = filtered_history[1:] if chat_length > 1 else []
         else:
-            # For discussion, use all history to get the latest 3
             history_to_use = filtered_history
 
         for i, entry in enumerate(reversed(history_to_use)):
             phase = entry["phase"]
 
-            if phase in ["discussion", "direct_discussion"]:
+            # Update to include open_discussion entries.
+            if phase in ["discussion", "direct_discussion", "open_discussion"]:
                 if idea_index is not None:
                     if entry.get("idea_index") == idea_index:
                         previous_responses.append(f"\n{entry['agent']} said: {entry['response']}")
                 else:
                     previous_responses.append(f"\n{entry['agent']} said: {entry['response']}")
-
             elif phase == "idea_generation":
                 previous_responses.append(f"\n{entry['agent']} said: {entry['response']}")
 
-            if len(previous_responses) == 3 and not (current_phase == "idea_generation" and llm_count == 6):
+            # Use number of agents instead of hardcoded 3
+            agent_count = len(self.agents)
+            if len(previous_responses) == agent_count and not (current_phase == "idea_generation" and llm_count == 6):
                 break
 
         previous_responses = list(reversed(previous_responses))  # Reverse to maintain chronological order
 
-        if current_phase in ["discussion", "direct_discussion"] and n_minus_3_ideas:
+        if current_phase in ["discussion", "direct_discussion", "open_discussion"] and n_minus_3_ideas:
             current_ideas_str = "\n".join(f"{i+1}. {idea}" for i, idea in enumerate(n_minus_3_ideas))
             previous_responses.insert(0, f"The initial ideas under discussion before team feedback:\n{current_ideas_str if current_ideas_str else '(none)'}")
 
         return previous_responses
 
 
-    def add_chat_entry(self, agent_model_name, agent_name, prompt, response, phase, idea_index=None, prompt_tokens=0, completion_tokens=0,reasoning_tokens=0, current_ideas=None,round_number=None):
+    def add_chat_entry(self, model_name, agent_name, prompt, response, phase, **kwargs):
         """
         Add a chat entry and update token usage.
         """
         try:
             entry = {
                 'agent': agent_name,
-                'agent_model':agent_model_name,
+                'agent_model':model_name,
                 'prompt': prompt,
                 'response': response,
                 'phase': phase,
-                'idea_index': idea_index if idea_index is not None else "N/A",
+                'idea_index': kwargs.get('idea_index', "N/A"),
             }
 
-            if phase in ["discussion","direct_discussion"]  and current_ideas is not None:
-                entry['current_ideas'] = list(current_ideas)  # Store a copy of the current_ideas list
+            # Update condition to include open_discussion
+            if phase in ["discussion", "direct_discussion", "open_discussion"] and 'current_ideas' in kwargs:
+                entry['current_ideas'] = list(kwargs['current_ideas'])  # Store a copy of the current_ideas list
             
-
-            if round_number is not None:
-                entry['round'] = round_number  # add round number
+            if 'round_number' in kwargs:
+                entry['round'] = kwargs['round_number']  # add round number
             
             self.chat_history.append(entry)
 
             # Update phase and overall token usage
-            # self.update_phase_token_usage(phase, prompt_tokens, completion_tokens,reasoning_tokens)
+            # self.update_phase_token_usage(phase, kwargs.get('prompt_tokens', 0), kwargs.get('completion_tokens', 0), kwargs.get('reasoning_tokens', 0))
+
+            log_message = f"[{phase}] {agent_name} ({model_name}):"
+            log_message += f"\nPrompt: {prompt}"
+            log_message += f"\nResponse: {response}"
+            # NEW: Log idea evolution concisely if provided via current_ideas along with round or idea information
+            if 'current_ideas' in kwargs:
+                current_ideas = kwargs.get('current_ideas', [])
+                # Use round_number or idea_index info if provided
+                round_info = kwargs.get('round_number', None) or kwargs.get('idea_index', None)
+                log_message += f"\nIdea Evolution: {current_ideas}"
+                if round_info is not None:
+                    log_message += f" | Info: {round_info}"
+            logging.info(log_message)
 
         except Exception as e:
             logging.error("Failed to add chat entry: %s", e)
@@ -207,6 +214,33 @@ class Conversation:
 
         return model_part
 
+    def extract_idea_evolution(self):
+        """
+        Extract the history of how ideas evolved throughout the discussion.
+        """
+        idea_history = []
+        
+        # Filter entries with current_ideas
+        for entry in self.chat_history:
+            # Skip ranking rounds based on a marker in the prompt.
+            if "Idea Ranking Task" in entry.get("prompt", ""):
+                continue
+            if 'current_ideas' in entry and entry['current_ideas']:
+                round_info = entry.get('round', 'N/A')
+                agent = entry['agent']
+                phase = entry['phase']
+                idea_index = entry.get('idea_index', 'N/A')
+                
+                idea_history.append({
+                    'round': round_info,
+                    'agent': agent,
+                    'phase': phase,
+                    'idea_index': idea_index,
+                    'ideas': list(entry['current_ideas']),
+                    'response': entry['response']
+                })
+        
+        return idea_history
 
     def save_chat_history(self, filename=None):
         """
@@ -251,8 +285,51 @@ class Conversation:
                 file.write(self.get_phase_token_summary())
                 file.write("\n\n=== Token Usage Summary ===\n")
                 file.write(self.get_token_summary())
+                
+                # Add idea evolution history
+                file.write("\n\n=== Idea Evolution History ===\n")
+                idea_history = self.extract_idea_evolution()
+                task_type = self.task_config.get("task_type", "AUT")
+                disc_method = self.task_config.get("discussion_method", "all_at_once")
+                
+                if disc_method == "all_at_once":
+                    # Group by rounds
+                    rounds = {}
+                    for entry in idea_history:
+                        round_num = entry.get('round', 'N/A')
+                        if round_num not in rounds:
+                            rounds[round_num] = []
+                        rounds[round_num].append(entry)
+                    
+                    for round_num, entries in sorted(rounds.items(), key=lambda x: (str(x[0]) if x[0] == 'N/A' else int(x[0]))):
+                        file.write(f"\n-- Round {round_num} --\n")
+                        for entry in entries:
+                            file.write(f"Agent: {entry['agent']}\n")
+                            file.write("Current Ideas:\n")
+                            for i, idea in enumerate(entry['ideas'], 1):
+                                file.write(f"{i}. {idea}\n")
+                            file.write(f"Response: {entry['response']}\n")
+                            file.write("-" * 40 + "\n")
+                else:
+                    # Group by idea index
+                    idea_indices = {}
+                    for entry in idea_history:
+                        idx = entry.get('idea_index', 'N/A')
+                        if idx not in idea_indices:
+                            idea_indices[idx] = []
+                        idea_indices[idx].append(entry)
+                    
+                    for idx, entries in sorted(idea_indices.items(), key=lambda x: (str(x[0]) if x[0] == 'N/A' else int(x[0]))):
+                        file.write(f"\n-- Idea #{idx} --\n")
+                        for entry in entries:
+                            file.write(f"Agent: {entry['agent']}\n")
+                            file.write("Current Idea:\n")
+                            for i, idea in enumerate(entry['ideas'], 1):
+                                file.write(f"{i}. {idea}\n")
+                            file.write(f"Response: {entry['response']}\n")
+                            file.write("-" * 40 + "\n")
+                
                 file.write("\n\n=== Chat History ===\n")
-
                 for entry in self.chat_history:
                     file.write(f"{entry['agent']}({entry['agent_model']}, {entry['phase']}, Idea Index: {entry.get('idea_index', 'N/A')}, Round: {entry.get('round', 'N/A')})\n")
                     file.write("-" * 80 + "\n")
@@ -293,5 +370,5 @@ class Conversation:
 
             except Exception as e:
                 logging.error(f"Failed to save backup chat history: {e}")
-                raise 
+                raise
 

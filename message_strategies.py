@@ -1,6 +1,7 @@
 # message_strategies.py
 
 import re
+import logging  # <-- Added for logging
 from prompts import TASK_REQUIREMENTS
 from utils import calculate_tokens
 
@@ -36,6 +37,8 @@ class GenericMessageStrategy:
             self._add_generation_instructions(msgs, agent, conversation)
         elif phase=="selection":
             self._add_selection_instructions(msgs, agent, conversation)
+        elif phase=="iterative_refinement":
+            self._add_iterative_refinement_instructions(msgs, agent, conversation)
         elif phase=="discussion":
             self._add_discussion_instructions(msgs, agent, conversation, idea_index,total_resp=total_resp,current_round=current_round, max_rounds=max_rounds)
             if include_intention_prompt:
@@ -49,6 +52,8 @@ class GenericMessageStrategy:
             if include_intention_prompt:
                 intention_prompt = TASK_REQUIREMENTS["Intention_Prompt"]
                 msgs.append({"role": "user", "content": "\n\n"+intention_prompt.strip()})
+        elif phase == "open_discussion":
+            self._add_open_discussion_instructions(msgs, agent, conversation, current_round, max_rounds)
 
         return msgs
     
@@ -157,12 +162,15 @@ class GenericMessageStrategy:
                 )
         else:
             if sel_method == "rating":
-                prompt = TASK_REQUIREMENTS["PS_Discussion_Rating"]
+                pool_size = self.task_config.get("replacement_pool_size", 3)
+                if pool_size == 0:
+                    prompt = TASK_REQUIREMENTS["PS_Discussion_Rating_NoPool"]
+                else:
+                    prompt = TASK_REQUIREMENTS["PS_Discussion_Rating"]
             else:
                 prompt = TASK_REQUIREMENTS["PS_Discussion_SelectionTop"]
-            prompt = (
-                    prompt.replace("{{total_resp}}", str(total_resp + 1))
-                )
+            prompt = prompt.replace("{{total_resp}}", str(total_resp + 1))
+            prompt = prompt.replace("{{max_rounds}}", str(self.task_config.get("max_rounds", 20)))
 
         # Display task-specific prompt first
         
@@ -239,12 +247,9 @@ class GenericMessageStrategy:
                         
                 )
             else:  # PS
-                # if current_round <=10 :
-                #     prompt = TASK_REQUIREMENTS["PS_Direct_Discussion_AllAtOnce_First"]
-                # elif current_round > 10:
-                #     prompt = TASK_REQUIREMENTS["PS_Direct_Discussion_AllAtOnce_Other"]
                 prompt = TASK_REQUIREMENTS["PS_Direct_Discussion_AllAtOnce"]
                 prompt = prompt.replace("{{total_resp}}", str(total_resp + 1))
+                prompt = prompt.replace("{{max_rounds}}", str(self.task_config.get("max_rounds", 20)))
 
 
         # Fetch previous responses
@@ -261,4 +266,121 @@ class GenericMessageStrategy:
             pass
         else:
             current_ideas_str = "\n".join(f"{i + 1}. {txt}" for i, txt in enumerate(self.data_strategy.current_ideas))
-            msgs.append({"role": "user", "content": f"\n# **Current Ideas Under Discussion:**\n{current_ideas_str if current_ideas_str else '(none)'}"}) 
+            msgs.append({"role": "user", "content": f"\n# **Current Ideas Under Discussion:**\n{current_ideas_str if current_ideas_str else '(none)'}"})
+
+    def _add_open_discussion_instructions(self, msgs, agent, conversation, current_round=None, total_rounds=None):
+        round_info = ""
+        agreement_focus_section = ""
+        is_final_rounds = False
+        instruction_header = "# **Instruction: Open Discussion**\n" # Default header
+
+        if current_round is not None and total_rounds is not None:
+            round_info = f"Current Round: {current_round} of {total_rounds}\n"
+            final_round_threshold = 5 # Or 3, adjust as needed
+            
+            if total_rounds - current_round < final_round_threshold:
+                is_final_rounds = True
+                instruction_header = "# **Instruction: Final Rounds - Drive Towards Agreement**\n" # More specific header
+                # Create the dedicated agreement section
+                agreement_focus_section = (
+                    "---\n"
+                    "**URGENT: FOCUS ON AGREEMENT**\n"
+                    f"You are in the final {final_round_threshold} rounds. Your primary objective now is to **actively work towards reaching an agreement or concrete proposal.**\n"
+                    "**Action Items for this round:**\n"
+                    "1.  **Summarize** points of agreement and disagreement based on the history below.\n"
+                    "2.  **Propose** specific compromises, solutions, or next steps towards resolution.\n"
+                    "3.  **Ask** targeted questions ONLY to resolve remaining differences needed for agreement.\n"
+                    "4.  **Avoid** introducing new, unrelated topics.\n"
+                    "Review the history below with this goal in mind.\n"
+                    "---\n"
+                )
+
+        # Base instruction body - might be slightly adjusted based on context
+        if is_final_rounds:
+             # In final rounds, the focus isn't really "share freely" anymore
+             base_instruction_body = (
+                 "Use the discussion history below to formulate a response that moves towards agreement, following the action items listed above.\n"
+                 "--- Discussion History ---\n"
+             )
+        else:
+            base_instruction_body = (
+                 "In this open discussion phase, please share your thoughts freely to explore the topic. "
+                 "Build upon previous points and share your perspective.\n"
+                 "--- Discussion History ---\n"
+             )
+
+        # Append history
+        history = conversation.get_previous_responses(current_phase="open_discussion")
+        history_text = "\n".join(history) if history else "(No previous responses.)"
+
+        # --- Combine Message Parts ---
+        # Order: Header, Round Info, Agreement Focus (if applicable), Base Body Intro, History
+        full_instruction = (
+            instruction_header +
+            round_info +
+            agreement_focus_section + # Placed BEFORE the history
+            base_instruction_body +
+            history_text
+        )
+        
+        msgs.append({"role": "user", "content": full_instruction})
+        
+        logging.info(f"Open discussion instructions added (Final Rounds: {is_final_rounds}), "
+                     f"current_round={current_round}, total_rounds={total_rounds}")
+
+    def _add_iterative_refinement_instructions(self, msgs, agent, conversation):
+        """
+        Add instructions for the iterative refinement process.
+        This includes current ideas, previous discussion context, and clear guidance.
+        """
+        # Get the model and role
+        model = agent.model_name
+        role = "user" if model in ['o3-mini','o1','o1-mini',"deepseek-ai/DeepSeek-R1","gemini-2.0-flash-thinking-exp"] else "system"
+        
+        # Get task type
+        task_type = self.task_config.get("task_type", "AUT")
+        
+        # 1. Add the main instructions
+        instruction = """# **Iterative Idea Refinement**
+Your goal is to generate ONE significantly improved and novel idea based on the provided context. Analyze the current idea(s) and discussion, identify weaknesses or opportunities, and create a superior alternative.
+
+**Process:**
+1.  **Review Current Idea(s):** Understand the core concept, strengths, and weaknesses of the idea(s) presented below.
+2.  **Analyze Previous Discussion:** Identify key insights, critiques, suggestions, and unresolved points from the discussion context.
+3. Create a new idea that is:
+   - More original, useful, and novel
+   - Addresses any limitations of the current idea(s)
+   - Builds on discussion insights
+   - Is clearly articulated and implementable
+   - The idea should be around 80-100 words.
+
+**Important:** 
+- Focus on quality over quantity - create ONE excellent idea rather than multiple ideas
+- Ensure your response is in valid, parseable JSON format with these exact field names
+- Use proper escaping for any quotes within JSON strings (e.g., \\" for quotes inside strings)
+- Structure your response in valid JSON format as follows:
+{ "Thinking": "Your detailed thought process and reasoning here, including how this idea improves upon existing ones", "Idea": "Your concise, clear idea statement here" }
+
+"""
+        msgs.append({"role": role, "content": instruction})
+        
+        current_round = conversation.data_strategy.current_idea_index + 1 if hasattr(conversation.data_strategy, "current_idea_index") else 1
+        max_rounds = self.task_config.get("max_responses", 15)  # Get the max_responses from task_config
+        round_info = f"Round: {current_round} of {max_rounds}"
+        msgs.append({"role": "user", "content": f"# **Round Information**\n{round_info}"})
+
+        # 2. Add current ideas section
+        current_ideas = conversation.data_strategy.current_ideas + conversation.data_strategy.replacement_ideas
+        if current_ideas:
+            current_ideas_formatted = "\n".join([f"{i+1}. {idea}" for i, idea in enumerate(current_ideas)])
+            msgs.append({"role": "user", "content": f"# **Current Idea(s)**\n{current_ideas_formatted}"})
+        
+        # 3. Add previous discussion context
+        prior_context = conversation.get_previous_responses(current_phase="discussion")
+        if prior_context:
+            msgs.append({"role": "user", "content": "# **Previous Discussion Context**\n" + "\n".join(prior_context)})
+        
+        # 4. Final prompt for generation
+        msgs.append({"role": "user", "content": "Please generate a new idea that is significantly better and more novel than the current idea(s). Be creative but practical."})
+        
+        return msgs

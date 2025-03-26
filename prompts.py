@@ -131,8 +131,6 @@ Your answers will be evaluated on its creativity (i.e., it should be both novel 
 """
 
 PS_GENERATION = """
-Think like a 24-year-old White female with a graduate degree in business and management, who works as a management consultant in a consulting firm, with the following personality profile according to the Big Five model (all personality scales range from 1 to 5, where 1 indicates a low score and 5 indicates a high score): Openness to Experience 3.7, Conscientiousness 3.5, Extraversion 3.0, Agreeableness 3.8, and Neuroticism 2.7. 
-
 - Please propose 3 possible ideas for the problem.
 - Each idea should be around 80-100 words.
 - List each idea on a separate line.
@@ -143,8 +141,6 @@ Think like a 24-year-old White female with a graduate degree in business and man
 """
 
 PS_GENERATION_DEPENDENT = """
-Think like a 24-year-old White female with a graduate degree in business and management, who works as a management consultant in a consulting firm, with the following personality profile according to the Big Five model (all personality scales range from 1 to 5, where 1 indicates a low score and 5 indicates a high score): Openness to Experience 3.7, Conscientiousness 3.5, Extraversion 3.0, Agreeableness 3.8, and Neuroticism 2.7. 
-
 - Please propose 3 additional ideas for the problem that are different from the previous ideas.
 - Each idea should be around 80-100 words.
 - List each idea on a separate line.
@@ -155,8 +151,6 @@ Think like a 24-year-old White female with a graduate degree in business and man
 """
 
 PS_SELECTION_RATING = """
-Think like a 24-year-old White female with a graduate degree in business and management, who works as a management consultant in a consulting firm, with the following personality profile according to the Big Five model (all personality scales range from 1 to 5, where 1 indicates a low score and 5 indicates a high score): Openness to Experience 3.7, Conscientiousness 3.5, Extraversion 3.0, Agreeableness 3.8, and Neuroticism 2.7. 
-
 - Below is the list of 9 proposed ideas.
 - Please rate **each and every idea** on on its creativity (i.e., novelty and usefulness), using a scale from 1 to 10. 
 - Avoid giving the same score to multiple ideas unless absolutely necessary. 
@@ -179,28 +173,27 @@ PS_SELECTION_SELECTIONTOP = """
 """
 
 PS_DISCUSSION_RATING = """
-Think like a 24-year-old White female with a graduate degree in business and management, who works as a management consultant in a consulting firm, with the following personality profile according to the Big Five model (all personality scales range from 1 to 5, where 1 indicates a low score and 5 indicates a high score): Openness to Experience 3.7, Conscientiousness 3.5, Extraversion 3.0, Agreeableness 3.8, and Neuroticism 2.7. 
-
 - You are reviewing the current top idea. 
 - Your team has a maximum of 20 rounds to finalize the list of ideas. You are currently on round {{total_resp}}.
+- The goal is to identify or create the SINGLE MOST CREATIVE idea, not to continually expand one idea.
 
 - Actions you can take for the idea:
   - **Agree:** If the current idea is extremely creative and you cannot come up with a more creative idea, reply "Agree: No changes needed."
-  - **Modify:** If the idea is moderately creative and could use improvement, propose modification. Use this format:
+  - **Modify:** If the idea has a strong creative core but could be significantly elevated. Your modification should aim for a leap in originality or impact, not just a minor tweak. Use this format:
     "Modify: [idea after modification] - Reason: [specific reason for improvement]."
   - **Replace:** If the idea is not creative or not aligned with the task objective, replace it with one from the shared replacement pool of top ideas. Use this format:
     "Replace: [replacement idea] - Reason: [specific reason for replacement]."
-
 - Each idea should be around 80-100 words.
 """
 
 PS_DISCUSSION_RATING_PRE = """
 - You are reviewing the current top idea. 
 - Your team has a maximum of 20 rounds to finalize the list of ideas. You are currently on round {{total_resp}}.
+- The goal is to identify or create the SINGLE MOST CREATIVE idea, not to continually expand one idea.
 
 - Actions you can take for each idea:
   - **Agree:** If the idea meets the task objective and does not require changes, reply "Agree: No changes needed."
-  - **Modify:** If the idea is aligned with the task objective but needs improvement, propose modification. Use this format:
+  - **Modify:** If the idea has a strong creative core but could be significantly elevated. Your modification should aim for a leap in originality or impact, not just a minor tweak. Use this format:
     "Modify: [idea after modification] - Reason: [specific reason for improvement]."
   - **Replace:** If the idea is not creative or not aligned with the task objective, replace it with one from the shared replacement pool of top ideas. Use this format:
     "Replace: [replacement idea] - Reason: [specific reason for replacement]."
@@ -211,24 +204,54 @@ PS_DISCUSSION_RATING_PRE = """
 PS_DISCUSSION_SELECTIONTOP = """
 - You are reviewing the current list of top ideas.
 - Your team has a maximum of 20 rounds to finalize the list of ideas. You are currently on round {{total_resp}}.
+- The goal is to identify or create the SINGLE MOST CREATIVE idea, not to continually expand one idea.
 
 - Actions you can take for the idea:
   - **Agree:** If the idea meets the task objective and does not require changes, reply "Agree: No changes needed."
-  - **Modify:** If the idea is aligned with the task objective and needs improvement to be better, propose modification. Use this format:
+  - **Modify:** If the idea has a strong creative core but could be significantly elevated. Your modification should aim for a leap in originality or impact, not just a minor tweak. Use this format:
     "Modify: [idea after modification] - Reason: [specific reason for improvement]."
   - **Replace:** If the idea is not creative or not aligned with the task objective, replace it with one from the replacement pool of top ideas selected by yourself. Use this format:
     "Replace: [replacement idea] - Reason: [specific reason for replacement]."
 """
 
+ 
 PS_DISCUSSION_SELECTIONTOP_PRE = """
 - You are reviewing the current list of top ideas.
 - Your team has a maximum of 20 rounds to finalize the list of ideas. You are currently on round {{total_resp}}.
+- The goal is to identify or create the SINGLE MOST CREATIVE idea, not to continually expand one idea.
 
 - Actions you can take for each idea:
   - **Agree:** If the idea meets the task objective and does not require changes, reply "Agree: No changes needed."
-  - **Modify:** If the idea is aligned with the task objective but needs improvement, propose modification. Use this format:
+  - **Modify:** If the idea has a strong creative core but could be significantly elevated. Your modification should aim for a leap in originality or impact, not just a minor tweak. Use this format:
     "Modify: [idea after modification] - Reason: [specific reason for improvement]."
   - **Replace:** If the idea is not creative or not aligned with the task objective, replace it with one from the replacement pool of top ideas selected by yourself. Use this format:
+    "Replace: [replacement idea] - Reason: [specific reason for replacement]."
+"""
+
+PS_DISCUSSION_RATING_NoPool = """
+- You are reviewing the current top idea.
+- Your team has a maximum of 20 rounds to finalize the idea. You are on round {{total_resp}}.
+- The goal is to identify or create the SINGLE MOST CREATIVE idea, not to continually expand one idea.
+
+- Actions you can take for the idea:
+  - **Agree:** If the current idea is extremely creative and you cannot come up with a more creative idea, reply "Agree: No changes needed."
+  - **Modify:** If the idea has a strong creative core but could be significantly elevated. Your modification should aim for a leap in originality or impact, not just a minor tweak. Use this format:
+    "Modify: [idea after modification] - Reason: [specific reason for improvement]."
+  - **Replace:** If the idea is not creative or not aligned with the task objective, replace it by coming up with a new one of your own. Use this format:
+    "Replace: [replacement idea] - Reason: [specific reason for replacement]."
+- The idea should be around 80-100 words.
+"""
+
+PS_DIRECT_DISCUSSION_ALL_AT_ONCE_NoPool = """
+- You are reviewing the current idea.
+- Your team has a maximum of 30 rounds to finalize the idea. You are on round {{total_resp}}.
+- The goal is to identify or create the SINGLE MOST CREATIVE idea, not to continually expand one idea.
+
+- Actions you can take for the idea:
+  - **Agree:** If the current idea is extremely creative and you cannot come up with a more creative idea, reply "Agree: No changes needed."
+  - **Modify:** If the idea has a strong creative core but could be significantly elevated. Your modification should aim for a leap in originality or impact, not just a minor tweak. Use this format:
+    "Modify: [idea after modification] - Reason: [specific reason for improvement]."
+  - **Replace:** If the idea is not creative or not aligned with the task objective, replace it by coming up with a new one of your own, a more creative one. Be bold, especially in earlier rounds. Use this format:
     "Replace: [replacement idea] - Reason: [specific reason for replacement]."
 """
 
@@ -243,6 +266,7 @@ AUT_DIRECT_FIRST_ROUND_ALL_AT_ONCE = """
 AUT_DIRECT_DISCUSSION_ALL_AT_ONCE = """
 - You are reviewing the current list of ideas. 
 - Your team has a maximum of 30 rounds to finalize the list of ideas. You are currently on round {{total_resp}}.
+- The goal is to identify or create the SINGLE MOST CREATIVE idea, not to continually expand one idea.
 
 - Actions you can take for each idea:
   - **Agree:** If the idea meets the task objective and does not require changes, reply "Agree: No changes needed."
@@ -384,5 +408,7 @@ TASK_REQUIREMENTS = {
     "PS_Direct_Discussion_AllAtOnce_Other":PS_DIRECT_DISCUSSION_ALL_AT_ONCE_RESTRICTION_OTHER,
 
     "Intention_Prompt_Ideas": INTENTION_PROMPT_IDEAS,
-    "Intention_Prompt_Idea": INTENTION_PROMPT_IDEA
+    "Intention_Prompt_Idea": INTENTION_PROMPT_IDEA,
+    "PS_Discussion_Rating_NoPool": PS_DISCUSSION_RATING_NoPool,
+    "PS_Direct_Discussion_AllAt_Once_NoPool": PS_DIRECT_DISCUSSION_ALL_AT_ONCE_NoPool,
 }
