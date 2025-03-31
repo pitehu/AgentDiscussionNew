@@ -12,7 +12,7 @@
 
 
 ## To-do
-- [ ] Check hand-raising implmentation: we need to decode everyone's answer first, and then ask for given what you said, how much willing are you to respond (we define what "contribution" mean, like you need to be quite different from current discussion etc)/, and then only keep the one with the highest rating
+- [ ] Check hand-raising implmentation: we need to decode everyone's answer first, and then ask for given what you said, how much willing are you to respond (we define what "contribution" mean, like you need to be quite different from current discussion etc)/, and then only keep the one with the highest rating； Tiancheng: probably only feasible with the default discussion way
 - [ ] Implement idea tracking properly: What I will need to do: explicity record current_idea pool at every turn
 - [ ] Implement the role-playing stuff in user prompt for every prompt (currently this is not done consistently)
 - [ ] Implement the at round X, total of round Y, and the final rounds warning consistently, across all conditions (will require some refactoring, I think)
