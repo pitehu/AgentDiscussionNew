@@ -7,12 +7,12 @@
 - [x] implement replacement idea pool as a function (it can be top-k ideas, or 0 meaning no replacement pool)
 - [x] Improve some of the prompt design
 - [x] First generate a new one, and then use current and past N ideas to rank (use clean chat history to call the agent), and then select the best one) replace if better; otherwise, pass; Kinda self-improve idea;  
+- [x] two phases of idea generation, emphasize novelty, so then we have 30 ideas, then rate again, and select 5, then improve (c.f. existing code; Luning: you might need to experiment with this a bit more)
 
 
 
 ## To-do
 - [ ] Check hand-raising implmentation: we need to decode everyone's answer first, and then ask for given what you said, how much willing are you to respond (we define what "contribution" mean, like you need to be quite different from current discussion etc)/, and then only keep the one with the highest rating
-- [ ] two phases of idea generation, emphasize novelty, so then we have 30 ideas, then rate again, and select 5, then improve (c.f. existing code; Luning: you might need to experiment with this a bit more)
 - [ ] Implement idea tracking properly: What I will need to do: explicity record current_idea pool at every turn
 - [ ] Implement the role-playing stuff in user prompt for every prompt (currently this is not done consistently)
 - [ ] Implement the at round X, total of round Y, and the final rounds warning consistently, across all conditions (will require some refactoring, I think)
