@@ -192,19 +192,47 @@ class Conversation:
     def sanitize_model_name(self, model_name):
         """
         Convert model names into a shorter, valid filename format.
+        Handles single strings or lists of strings.
+        Replaces invalid filename characters and specific patterns like '/'.
         """
         MODEL_SHORT_NAMES = {
-        "gemini-2.0-flash-thinking-exp": "gemini",
-        "deepseek-ai/DeepSeek-R1": "deepseek",
+            "gemini-2.0-flash-thinking-exp": "gemini2-flash",
+            "deepseek-ai/DeepSeek-R1": "deepseek-R1",
+            # Add other short names as needed
+            "o1-mini": "o1-mini",
+            "o3-mini": "o3-mini",
         }
-        if isinstance(model_name, list):
-            model_part = "_".join([MODEL_SHORT_NAMES.get(m, m) for m in model_name])
-        else:
-            model_part = MODEL_SHORT_NAMES.get(model_name, model_name)  # Use short name if available
 
+        # Ensure model_name is processed correctly whether it's a string or list
+        if isinstance(model_name, list):
+            # Sanitize each part and get short name if available
+            sanitized_parts = []
+            for m in model_name:
+                short_name = MODEL_SHORT_NAMES.get(m, m)
+                # Basic sanitization for each part before joining
+                invalid_chars = r'<>:"/\|?*'
+                for char in invalid_chars:
+                    short_name = short_name.replace(char, "-")
+                short_name = short_name.replace("/", "-") # Ensure slashes are replaced
+                sanitized_parts.append(short_name)
+            model_part = "_".join(sanitized_parts)
+        else:
+            # Handle single string model name
+            model_part = MODEL_SHORT_NAMES.get(model_name, model_name)
+            # Sanitize the single model name
+            invalid_chars = r'<>:"/\|?*'
+            for char in invalid_chars:
+                model_part = model_part.replace(char, "-")
+            model_part = model_part.replace("/", "-") # Ensure slashes are replaced
+
+        # Final check for any remaining invalid chars (redundant but safe)
         invalid_chars = r'<>:"/\|?*'
         for char in invalid_chars:
             model_part = model_part.replace(char, "-")
+
+        # Optional: Limit length if needed
+        # max_len = 50
+        # model_part = model_part[:max_len]
 
         return model_part
 
@@ -241,31 +269,73 @@ class Conversation:
         Save the chat history and token usage to a file.
         """
         if not filename:
+            # --- 1. Get configuration values with safe defaults ---
             model_name = self.task_config.get("model", "unknown_model")
             temperature = self.task_config.get("temperature", "default_temp")
-            llm_count = len(self.agents)
+            # Ensure llm_count is fetched correctly (assuming self.agents exists)
+            llm_count = len(self.agents) if hasattr(self, 'agents') else self.task_config.get("llm_count", "unknown_count")
             persona_type = self.task_config.get("persona_type", "unknown_persona")
             phases = self.task_config.get("phases", "unknown_phases")
-            generation_method = self.task_config.get("generation_method", "unknown_generation")
-            discussion_method = self.task_config.get("discussion_method", "unknown_discussion")
-            replacement_pool_size = self.task_config.get("replacement_pool_size", "unknown_replacement_pool_size")
-            replacement_pool_size = str(replacement_pool_size)
+            generation_method = self.task_config.get("generation_method", "unknown_gen")
+            discussion_method = self.task_config.get("discussion_method", "unknown_disc")
+            replacement_pool_size = self.task_config.get("replacement_pool_size", "unknown_pool")
+            discussion_order_method = self.task_config.get("discussion_order_method", "unknown_order")
+
+            # --- 2. Sanitize model name ---
             try:
-                model_part = self.sanitize_model_name(model_name) 
+                # Use the improved sanitize_model_name
+                model_part = self.sanitize_model_name(model_name)
             except Exception as e:
-                logging.error(f"sanitize_model_name failed: {e}")
-                model_part = "unknown_model"
-            
-            if model_part == "deepseek-ai/DeepSeek-R1":
-                base_filename = f"deepseek_{temperature}_{llm_count}_{persona_type}_DiscussionOnly.txt"
-            elif model_part in ['o1-mini', 'o3-mini']:
-                base_filename = f"{model_part}_#_{llm_count}_{persona_type}_{generation_method if phases != 'direct_discussion' else 'DiscussionOnly'}_Think.txt"
-            elif phases == 'direct_discussion':
-                base_filename = f"{model_part}_{temperature}_{llm_count}_{persona_type}_DiscussionOnly.txt"
+                logging.error(f"sanitize_model_name failed for '{model_name}': {e}")
+                model_part = "error_model" # Use a distinct name for error case
+
+            # --- 3. Prepare filename components consistently ---
+            temp_str = str(temperature)
+            count_str = str(llm_count)
+            persona_str = str(persona_type)
+            phases_str = str(phases)
+            order_str = str(discussion_order_method)
+
+            # Use specific values or "NA" for phase-dependent parts
+            if phases == 'direct_discussion':
+                gen_method_str = "Direct" # Indicates no separate generation phase
+                disc_method_str = "NA"     # No specific discussion method needed here
+                pool_str = "NA"          # No replacement pool
             elif phases == 'three_stage':
-                base_filename = f"{model_part}_{temperature}_{llm_count}_{persona_type}_{generation_method}_{discussion_method}_pool_size_{replacement_pool_size}.txt"
+                gen_method_str = str(generation_method)
+                disc_method_str = str(discussion_method)
+                # Format pool size clearly
+                pool_str = f"pool_{replacement_pool_size}"
             else:
-                base_filename = "chat_history.txt" 
+                # Default handling for other/unknown phases
+                gen_method_str = str(generation_method)
+                disc_method_str = str(discussion_method)
+                 # Assume pool size might be relevant or use "NA"
+                pool_str = f"pool_{replacement_pool_size}" if replacement_pool_size != "unknown_pool" else "NA"
+
+
+            # --- 4. Construct the base filename from components ---
+            # Consistent order: model, temp, count, persona, phases, gen_method, disc_method, order, pool
+            filename_parts = [
+                model_part,
+                temp_str,
+                count_str,
+                persona_str,
+                phases_str,
+                gen_method_str,
+                disc_method_str,
+                order_str,
+                pool_str,
+            ]
+
+            # Join parts with underscore and add extension
+            # Filter out any potential empty strings just in case
+            base_filename = "_".join(filter(None, filename_parts)) + ".txt"
+
+            # Optional: Further sanitization like removing consecutive underscores or length limiting
+            base_filename = base_filename.replace("__", "_") # Clean up potential double underscores if parts were empty/NA
+
+
 
             filename = base_filename
             version = 1

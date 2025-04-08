@@ -5,18 +5,17 @@ from main import main
 task_combinations = [
     # {"llm_count": 3, "persona_type": "same", "phases": "three_stage", "generation_method": "independent"},
     #Open
-    #{"llm_count": 3, "persona_type": "different", "phases": "three_stage", "generation_method": "dependent", "discussion_method": "open", "discussion_order_method":"fixed"},
+    {"llm_count": 3, "persona_type": "different", "phases": "three_stage", "generation_method": "dependent", "discussion_method": "open", "discussion_order_method":"fixed"},
     #Instructed
-    #{"llm_count": 3, "persona_type": "different", "phases": "three_stage", "generation_method": "dependent", "discussion_method": "all_at_once", "discussion_order_method":"fixed", "replacement_pool_size":0},
+    {"llm_count": 3, "persona_type": "different", "phases": "three_stage", "generation_method": "dependent", "discussion_method": "all_at_once", "discussion_order_method":"fixed", "replacement_pool_size":0},
     # #Instructed - replacement pool size top 5 
-    #{"llm_count": 3, "persona_type": "different", "phases": "three_stage", "generation_method": "dependent", "discussion_method": "all_at_once", "discussion_order_method":"fixed", "replacement_pool_size":5},
+    {"llm_count": 3, "persona_type": "different", "phases": "three_stage", "generation_method": "dependent", "discussion_method": "all_at_once", "discussion_order_method":"fixed", "replacement_pool_size":5},
     #Instructed - replcaement pool 0 - hand_raising
-
     {"llm_count": 3, "persona_type": "different", "phases": "three_stage", "generation_method": "dependent", "discussion_method": "all_at_once", "discussion_order_method":"hand_raising", "replacement_pool_size":0},
     # # Iterative refinement
-    #{"llm_count": 3, "persona_type": "different", "phases": "three_stage", "generation_method": "dependent", "discussion_method": "iterative_refinement", "discussion_order_method":"fixed", "replacement_pool_size":0},
+    {"llm_count": 3, "persona_type": "different", "phases": "three_stage", "generation_method": "dependent", "discussion_method": "iterative_refinement", "discussion_order_method":"fixed", "replacement_pool_size":0},
     # # Additional Idea Generation 
-    # {"llm_count": 3, "persona_type": "different", "phases": "three_stage", "generation_method": "dependent", "discussion_method": "creative", "discussion_order_method":"fixed", "replacement_pool_size":0},
+    {"llm_count": 3, "persona_type": "different", "phases": "three_stage", "generation_method": "dependent", "discussion_method": "creative", "discussion_order_method":"fixed", "replacement_pool_size":0},
 
 ]
 
