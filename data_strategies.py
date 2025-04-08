@@ -24,7 +24,6 @@ class GenericDataStrategy:
         self.replacement_ideas = []         # For rating scenario (shared), or selectionTop scenario if you prefer
         self.left = []                      # leftover pool, used if we want to keep replacements at a certain size
         self.replaced_ideas = []
-
         # For selectionTop:
         self.agent_selected_ideas = {}      # {agent_name: [ idx1, idx2 ... ] or direct text}
 
@@ -205,7 +204,7 @@ class GenericDataStrategy:
         # 1) use GPT to interprete agent_response =>  "If_agree", "current_ideas", "replacement_ideas"
         # Call the parsing function
         parse_result, prompt_tokens, completion_tokens,reasoning_tokens = self._parse_agent_response_with_gpt(agent_response, agent_name)
-
+        print("parse_result", parse_result)
         # Update token usage in the conversation
         conversation.update_phase_token_usage("other",prompt_tokens, completion_tokens,reasoning_tokens)
 
@@ -401,18 +400,18 @@ class GenericDataStrategy:
         For each idea:
         - **Agree**: Reply "Agree: No changes needed."
         - **Modify**: Reply "Modify: [updated idea] - Reason: [specific reason]."
-        - **Replace**: Reply "Replace: [replacement idea] - Reason: [why this is better and what the original idea lacks]."
+        - **Replace**: Reply "Replace: [full replacement idea] - Reason: [why this is better and what the original idea lacks]."
 
         Updates to apply:
         - **Agree**: No changes to the `current_ideas` or `replacement_ideas`.
-        - **Modify**: Update the `current_ideas` list with the modified idea; do not modify the `replacement_ideas`.
+        - **Modify**: Update the `current_ideas` list with the modified idea; do not modify or shorten the `replacement_ideas`.
         - **Replace**: 
             1. Replace the idea in `current_ideas` with the selected replacement idea.
             2. Remove the used replacement idea from the replacement_ideas pool to ensure it’s no longer available for further use.
             3. Discard the replaced idea and move it to the `replaced_ideas` list for record-keeping.
 
         Ensure the `current_ideas` list always contains exactly 5 ideas after adjustments.
-
+        **IMPORTANT: When constructing the `current_ideas` and `replacement_ideas` lists in the JSON output, you MUST use the exact, full, original text of each idea as presented in the input context above. Do NOT shorten or summarize the ideas unless an idea was specifically modified (in which case, use the full modified text). Preserve formatting like newlines within the idea text if possible.**
         Expected output JSON:
         {{
             "action_type": "agree" or "adjust",

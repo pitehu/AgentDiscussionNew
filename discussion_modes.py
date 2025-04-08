@@ -6,7 +6,7 @@ import logging
 from prompts import TASK_REQUIREMENTS
 import json
 import re
-
+from collections import defaultdict
 class GenericDiscussionMode:
     def __init__(self, conversation, task_config, message_strategy):
         self.conversation = conversation
@@ -88,8 +88,11 @@ class GenericDiscussionMode:
                 ]
 
                 print("Predefined ranked ideas loaded.")
+            
             if discussion_method == "open":
                 self.run_open_discussion()
+            elif discussion_method == "creative":  # New branch
+                self.run_creative_generation()
             elif discussion_method == "iterative_refinement":
                 self.run_iterative_refinement()
             elif discussion_method in ["all_at_once", "one_by_one"]:
@@ -110,13 +113,81 @@ class GenericDiscussionMode:
             msgs = self.message_strategy.construct_messages(agent, "open_discussion", self.conversation, current_round=total_resp+1, max_rounds=self.max_responses)
             resp, prompt_tokens, completion_tokens, reasoning_tokens = agent.generate_response(msgs)
             # Updated: pass current_ideas and round_number for proper idea evolution logging.
-            self.conversation.add_chat_entry(agent.model_name, agent.name, "\n".join(m["content"] for m in msgs), resp, "open_discussion", current_ideas=self.data_strategy.current_ideas, round_number=total_resp+1)
+            self.conversation.add_chat_entry(agent.model_name, agent.name, "\n".join(m["content"] for m in msgs), resp, "open_discussion", round_number=total_resp+1)
             self.conversation.update_phase_token_usage("discussion", prompt_tokens, completion_tokens, reasoning_tokens)
             self.data_strategy.update_shared_data(self.conversation, resp)
             print(f"[open_discussion] {agent.name} => {resp}")
             total_resp += 1
         print("Open discussion phase ended.")
     
+            # Select the last agent who spoke to summarize
+        summarizing_agent = self.conversation.current_agent
+        
+        task_type = self.task_config.get("task_type", "AUT")
+        task_context = TASK_REQUIREMENTS['AUT_Mode1_Overall'] if task_type == "AUT" else TASK_REQUIREMENTS['PS_Overall']
+
+        model = summarizing_agent.model_name
+        role = "user" if model in ['o3-mini','o1','o1-mini',"deepseek-ai/DeepSeek-R1","gemini-2.0-flash-thinking-exp"] else "system"
+
+        # Create a summary request message
+        summary_msgs = [
+            {
+                "role": role,
+                "content": (
+                    f"You have participated in a collaborative discussion based on this task: \n{task_context}\n"
+                    "Your goal now is to synthesize the key elements and insights from the entire discussion "
+                    "into a single, compelling, and well-defined final idea. Present this as a unified concept, "
+                    "as if you are proposing the final outcome of the collaboration."
+                )
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Based on the entire discussion that just took place, formulate the definitive final idea. "
+                    "Present it clearly and concisely as a single concept. Start your response *exactly* with 'FINAL IDEA:' "
+                    "The description of the idea itself should be approximately 80-100 words.\n"
+                )
+            }
+        ]
+        history = conversation.get_previous_responses(current_phase="open_discussion",history_depth=None)
+        history_text = "\n".join(history) if history else "(Start of the open discussion phase)"
+        history_section = (
+            f"**Discussion So Far:**\n"
+            f"{history_text}\n"
+            # Separator moved here, before the optional warning/final prompt
+            "---\n"
+        )
+        summary_msgs.append({
+            "role": 'user',
+            "content": history_section
+        })
+
+        # Generate the summary
+        final_idea, pt, ct, rt = summarizing_agent.generate_response(summary_msgs)
+        
+
+        # Update token usage
+        self.conversation.update_phase_token_usage("discussion", pt, ct, rt)
+        
+        # Extract the final idea (remove the prefix if present)
+        if "FINAL IDEA:" in final_idea:
+            final_idea = final_idea.split("FINAL IDEA:")[1].strip()
+        
+        # Update the data strategy with the final idea
+        self.data_strategy.current_ideas = [final_idea]
+                # Log the summary
+        self.conversation.add_chat_entry(
+            summarizing_agent.model_name,
+            summarizing_agent.name,
+            "\n".join(m["content"] for m in summary_msgs),
+            final_idea,
+            "open_discussion",
+            current_ideas=[final_idea],
+            round_number=total_resp+1
+        )
+        
+        print(f"[open_discussion_summary] {summarizing_agent.name} => {final_idea}")
+        print("Open discussion phase ended with final idea extraction.")
     def run_iterative_refinement(self):
             # Initialize tracking variables
         print("Starting iterative refinement discussion phase.")
@@ -125,7 +196,13 @@ class GenericDiscussionMode:
 
         total_resp = 0
         max_rounds = self.max_responses  # Use the same max as other discussion methods
-        
+        if not hasattr(self.data_strategy, 'past_current_ideas'):
+                self.data_strategy.past_current_ideas = [] # Or deque(maxlen=self.max_past_ideas)
+        if not hasattr(self.data_strategy, 'all_generated_ideas'):
+                self.data_strategy.all_generated_ideas = self.data_strategy.ranked_ideas[:] # Start with current
+        if not self.data_strategy.current_ideas:
+                self.data_strategy.current_ideas= [self.data_strategy.ranked_ideas[0]]
+
         # Continue for multiple rounds
         while total_resp < max_rounds:
 
@@ -136,12 +213,7 @@ class GenericDiscussionMode:
             total_completion_tokens = 0
             total_reasoning_tokens = 0
             
-            if not self.data_strategy.current_ideas:
-                self.data_strategy.current_ideas= [self.data_strategy.ranked_ideas[0]]
-            if not self.data_strategy.replacement_ideas:
-                self.data_strategy.replacement_ideas= self.data_strategy.ranked_ideas[1:5]
-            if not self.data_strategy.left:
-                self.data_strategy.left= self.data_strategy.ranked_ideas[5:]
+
 
             # Capture the current ideas for reference
             original_ideas = self.data_strategy.current_ideas.copy()
@@ -155,40 +227,16 @@ class GenericDiscussionMode:
             response, prompt_tokens, completion_tokens, reasoning_tokens = agent.generate_response(msgs)
 
             # Parse the JSON response to extract the idea
-            new_idea = ""
-            reasoning = ""
-            try:
-                # Try to find and parse JSON content in the response
-                # First look for content between curly braces that looks like JSON
-                json_match = re.search(r'(\{[\s\S]*\})', response)
-                if json_match:
-                    json_str = json_match.group(1)
-                    data = json.loads(json_str)
-                    if "Idea" in data:
-                        new_idea = data["Idea"]
-                        reasoning = data.get("Thinking", "")
-                    else:
-                        print("JSON found but missing 'Idea' field")
-                        new_idea = response  # Fallback to using full response
-                else:
-                    print("No JSON structure found in response")
-                    new_idea = response  # Fallback to using full response
-            except json.JSONDecodeError as e:
-                print(f"JSON parsing error: {e}")
-                # Fallback to simple extraction if JSON parsing fails
-                new_idea = response
-                
+            new_idea = response
             print(f"Extracted idea: {new_idea}")
             # You can also store the reasoning if needed
-            if reasoning:
-                print(f"Reasoning: {reasoning[:100]}...")  # Show first 100 chars of reasoning
-                
+            self.data_strategy.all_generated_ideas.append(new_idea)
             # Update token usage and conversation log
             self.conversation.add_chat_entry(
                 agent.model_name, 
                 agent.name, 
                 "\n".join(m["content"] for m in msgs), 
-                response, 
+                response,
                 "discussion",
                 round_number=total_resp+1
             )
@@ -212,24 +260,21 @@ class GenericDiscussionMode:
                 system_prompt = TASK_REQUIREMENTS['AUT_Overall']
             
             # Build ranking prompt (unchanged)
-            ideas_to_rank = [new_idea] + self.data_strategy.current_ideas + self.data_strategy.ranked_ideas[1:5]
-            ideas_text = "\n".join([f"Idea {i+1}: {idea}" for i, idea in enumerate(ideas_to_rank)])
+            ideas_to_rank = [new_idea] + self.data_strategy.current_ideas + self.data_strategy.past_current_ideas
+            # Randomize order using list operations instead of string operations
+            shuffled_ideas = ideas_to_rank[:]  # Create a copy of the list
+            random.shuffle(shuffled_ideas)  # Shuffle the copy
+            # Create text with randomized order
+            ideas_text = "\n".join([f"Idea {i+1}: {idea}" for i, idea in enumerate(shuffled_ideas)])
 
             ranking_prompt = f"""# **Idea Ranking Task**
-    As an expert evaluator, please rank the following ideas from BEST to WORST based on:
-    1. Originality and innovation
-    2. Usefulness and practicality
-    3. Completeness and clarity
+    As an expert creative idea evaluator, please output the BEST idea based on the following criteria:
+    1. Novelty
+    2. Usefulness
 
     Ideas to rank:
     {ideas_text}
-
-    Provide your ranking in this exact format:
-    1. [Full text of best idea]
-    2. [Full text of second best idea]
-    ... and so on
-
-    Start your response with "RANKING:" and then list the ideas in ranked order.
+    Provide only the best idea, verbatim.
             """
 
             # Instead of overwriting, combine system_prompt with ranking_prompt in two messages.
@@ -238,48 +283,36 @@ class GenericDiscussionMode:
                 {"role": role, "content": ranking_prompt}
             ]
             
-            ranking_response, r_prompt_tokens, r_completion_tokens, r_reasoning_tokens = agent.generate_response(ranking_msgs)
+            best_idea, r_prompt_tokens, r_completion_tokens, r_reasoning_tokens = agent.generate_response(ranking_msgs)
             
             # Update token usage
             total_prompt_tokens += r_prompt_tokens
             total_completion_tokens += r_completion_tokens  
             total_reasoning_tokens += r_reasoning_tokens
             
+
+            # Determine if the new idea is best and should replace current idea
+            if best_idea == new_idea or new_idea in best_idea:
+                self.data_strategy.past_current_ideas.append(self.data_strategy.current_ideas[0])
+                self.data_strategy.current_ideas = [new_idea]
+                print(f"[iterative_refinement] New idea ranked highest and replaced current idea.")
+                replacement_made = True
+            else:
+                print(f"[iterative_refinement] Current idea ranked higher. No replacement made.")
+                replacement_made = False
             # Add ranking to conversation log
             self.conversation.add_chat_entry(
                 agent.model_name,
                 agent.name,
                 system_prompt + "\n" + ranking_prompt,
-                ranking_response,
-                "iterative_refinement_ranking",
+                best_idea,
+                "discussion",
                 round_number=total_resp+1
             )
             
-            # Process ranking to extract best idea
-            best_idea = None
-            try:
-                # Look for the first idea in the ranking
-                lines = ranking_response.strip().split('\n')
-                for line in lines:
-                    if line.startswith('1.') or line.startswith('RANKING: 1.') or 'RANKING:\n1.' in line:
-                        best_idea = line.replace('1.', '').replace('RANKING:', '').strip()
-                        break
-                        
-                if not best_idea:
-                    # Default to the new idea if parsing fails
-                    best_idea = new_idea
-                    print("Failed to parse ranking response. Defaulting to the new idea.")
-            except Exception as e:
-                best_idea = new_idea
-                print(f"Error parsing ranking: {e}. Defaulting to the new idea.")
             
-            # Determine if the new idea is best and should replace current idea
-            if best_idea == new_idea or new_idea in best_idea:
-                self.data_strategy.current_ideas = [new_idea]
-                print(f"[iterative_refinement] New idea ranked highest and replaced current idea.")
-            else:
-                print(f"[iterative_refinement] Current idea ranked higher. No replacement made.")
-            
+            if len(self.data_strategy.past_current_ideas) >  self.task_config.get("replacement_pool_size", 3):
+                self.data_strategy.past_current_ideas= self.data_strategy.past_current_ideas[-self.task_config.get("replacement_pool_size", 3):]
             # After ranking and evaluating:
             if best_idea == new_idea or new_idea in best_idea:
                 # Reset counter when idea improves
@@ -298,8 +331,9 @@ class GenericDiscussionMode:
                 agent.model_name,
                 agent.name,
                 "", 
-                f"Final idea for (Round {total_resp+1}): {self.data_strategy.current_ideas[0]}", 
+                f"Replaced:{replacement_made}. Final idea for (Round {total_resp+1}): {self.data_strategy.current_ideas[0]}", 
                 "discussion",
+                current_ideas = self.data_strategy.current_ideas,
                 round_number=total_resp+1
             )
             
@@ -316,6 +350,119 @@ class GenericDiscussionMode:
         print(f"Original idea: {original_ideas[0] if original_ideas else '(none)'}")
         print(f"Final idea: {self.data_strategy.current_ideas[0]}")
         return
+
+
+
+    def run_creative_generation(self):
+        print("Starting creative generation phase.")
+        # Step 1: Creative idea generation (expect 9 new ideas)
+        original_top_ideas = self.data_strategy.ranked_ideas[:5].copy()  # or just list slicing        
+        novel_ideas = []
+        for agent in self.conversation.agents:
+            self.conversation.current_agent = agent
+            msgs = self.message_strategy.construct_messages(agent, "creative_generation", self.conversation)
+            resp, pt, ct, rt = agent.generate_response(msgs)
+            
+            # Parse the response to extract 5 ideas
+            ideas = [idea.strip() for idea in resp.split('\n') if idea.strip()]
+            novel_ideas.extend([(idea, agent.name) for idea in ideas[:5]])
+            
+            # use ranked idea as current idea store
+            self.data_strategy.ranked_ideas.extend(ideas[:5])
+            self.conversation.add_chat_entry(
+                agent.model_name,
+                agent.name,
+                "\n".join(m["content"] for m in msgs),
+                resp,
+                "creative_generation",
+                current_ideas = ideas,
+
+            )
+            self.conversation.update_phase_token_usage("discussion", pt, ct, rt)
+            print(f"Agent {agent.name} generated {len(ideas[:5])} novel ideas")
+
+
+        # Step 2: Collect creative ideas as the new pool
+        self.data_strategy.all_ideas=([{"idea": idea, "agent": agent} for idea,agent in novel_ideas])
+        # For creative phase, we expect a full rating on these ideas.
+        # Reusing selection: here force selection method "rating" and use all creative ideas as ranked pool.
+        self.data_strategy.idea_scores = {}  # reset scores
+        self.run_selection_novelty()
+        # Step 3: Select top creative idea from ranked_ideas (first one)
+
+        self.data_strategy.current_ideas = self.data_strategy.ranked_ideas[:5]  # Get the top 5 ideas for reference
+        print(f"Top 5 creative ideas: {self.data_strategy.current_ideas}")
+
+        for agent in self.conversation.agents:
+            # each agent improve all 5 in a round
+
+            self.conversation.current_agent = agent
+            msgs = self.message_strategy.construct_messages(agent, 'practical_discussion', self.conversation)
+            resp, pt, ct, rt = agent.generate_response(msgs)
+            ideas = [idea.strip() for idea in resp.split('\n') if idea.strip()]
+            self.data_strategy.current_ideas = ideas
+            self.conversation.add_chat_entry(
+            agent.model_name,
+            agent.name,
+            "\n".join(m["content"] for m in msgs),
+            resp,
+            "practical_discussion",
+            current_ideas = ideas
+            )
+
+
+        # Step (e): Final ranking combining top novel and initial ideas
+        combined_ideas = original_top_ideas + self.data_strategy.current_ideas
+        random.shuffle(combined_ideas)  # Randomize order
+        self.data_strategy.all_ideas = [{"idea": idea, "agent": "system"} for idea in combined_ideas]
+
+        self.data_strategy.idea_scores = {}  # reset scores
+        self.run_selection()
+        # now choose the best one
+        self.data_strategy.current_ideas = [self.data_strategy.ranked_ideas[0]]
+        print(f"Final selected idea: {self.data_strategy.current_ideas[0]}")
+        # log it
+        # Log the final outcome
+        self.conversation.add_chat_entry(
+            "system",
+            "system",
+            "Final idea selection from creative generation process",
+            self.data_strategy.current_ideas[0],
+            "creative_generation",
+            current_ideas=[self.data_strategy.current_ideas[0]],
+        )
+
+
+
+
+
+
+    def run_practical_discussion(self):
+        print("Starting practical discussion phase.")
+        self.data_strategy.first_agent_name = None  # optional clear
+        disc_method = self.task_config.get("discussion_method", "all_at_once")
+            # Reuse the same all_at_once loop, but messages use phase 'practical_discussion'
+        self.data_strategy.reset_agreements()
+        total_resp = 0
+        while total_resp < self.max_responses:
+            remain = [ag for ag in self.conversation.agents if not self.data_strategy.agent_has_agreed(ag.name)]
+            if not remain:
+                print("All agents agreed (practical discussion).")
+                self._print_final()
+                return
+            agent = self._select_next_agent(remain)
+            self.conversation.current_agent = agent
+            msgs = self.message_strategy.construct_messages(agent, 'practical_discussion', self.conversation)
+            resp, pt, ct, rt = agent.generate_response(msgs)
+            self.conversation.add_chat_entry(agent.model_name, agent.name, "\n".join(m["content"] for m in msgs), resp, 'discussion', current_ideas=self.data_strategy.current_ideas, round_number=total_resp+1)
+            self.conversation.update_phase_token_usage("discussion", pt, ct, rt)
+            print(f"[practical_discussion] {agent.name} => {resp}")
+            self.data_strategy.update_shared_data(self.conversation, resp)
+            total_resp += 1
+        print("Practical discussion phase ended.")
+        print("\n=== Final Token Usage Summary ===")
+        print(self.conversation.get_token_summary())
+
 
     # ---------------- Single Agent ----------------
     def run_single_llm_mode(self):
@@ -396,6 +543,42 @@ class GenericDiscussionMode:
         print("\n=== Token Usage Summary (Selection Phase) ===")
         print(self.conversation.get_token_summary())
 
+    def run_selection_novelty(self):
+        """Special version of run_selection that uses novelty-focused prompts"""
+        print("Starting creative selection phase.")
+        agents = self.conversation.agents[:]
+        if self.task_config.get("discussion_order_method") == "random":
+            random.shuffle(agents)
+
+        for ag in agents:
+            self.conversation.current_agent = ag
+            # Use selection_novelty instead of regular selection prompt
+            msgs = self.message_strategy.construct_messages(ag, 'selection_novelty', self.conversation)
+            
+            lines = [f"Idea {i+1}: {x['idea']}" for i,x in enumerate(self.data_strategy.all_ideas)]
+            msgs.append({"role": "assistant", "content": "\n".join(lines)})
+
+            resp, prompt_tokens, completion_tokens, reasoning_tokens = ag.generate_response(msgs)
+            self.conversation.add_chat_entry(
+                ag.model_name, 
+                ag.name, 
+                "\n".join(m["content"] for m in msgs), 
+                resp, 
+                'selection_novelty'
+            )
+            self.conversation.update_phase_token_usage(
+                "selection",
+                prompt_tokens, 
+                completion_tokens,
+                reasoning_tokens
+            )
+            
+            self.data_strategy.collect_scores(ag.name, resp)
+
+        self.data_strategy.calculate_rankings_by_average(self.conversation)
+        print("\n=== Token Usage Summary (Creative Selection Phase) ===")
+        print(self.conversation.get_token_summary())
+
     # ---------------- Discussion ----------------
     def run_discussion(self):
         print("Starting discussion phase.")
@@ -412,158 +595,298 @@ class GenericDiscussionMode:
 
     def discussion_all_at_once(self):
         """
-        Handle (rating) or (selectionTop), for AUT or PS.
-        If rating => init topN + replacement + left
-        If selectionTop => first time pick agent => use their picks => ...
-        Then each agent can replace/modify/no-objection
+        Handles 'all_at_once' discussion.
+        Branches behavior based on 'discussion_order_method':
+        - 'hand_raising': New two-pass mechanism (generate all -> score all -> select highest).
+        - 'fixed'/'random': Original mechanism (select speaker -> generate -> commit).
+        Supports (rating) or (selectionTop), for AUT or PS.
         """
+        disc_order = self.task_config.get("discussion_order_method", "fixed")
+        print(f"Starting discussion phase (all_at_once, order: {disc_order}).")
+
         self.data_strategy.reset_agreements()
-        sel_method= self.task_config.get("selection_method","rating")
-        ttype= self.task_config.get("task_type","AUT")
+        sel_method = self.task_config.get("selection_method", "rating")
+        ttype = self.task_config.get("task_type", "AUT")
+        initial_setup_done = False
 
-        # rating => init
-        if sel_method=="rating":
-            if ttype=="AUT":
-                # top5, next5
-                self.data_strategy.current_ideas= self.data_strategy.ranked_ideas[:5]
-                self.data_strategy.replacement_ideas= self.data_strategy.ranked_ideas[5:10]
-                self.data_strategy.left= self.data_strategy.ranked_ideas[10:]
-            else:
-                # PS branch: take top1 for current ideas and next k for replacement based on config.
-                pool_size = self.task_config.get("replacement_pool_size", 3)
-                self.data_strategy.current_ideas= self.data_strategy.ranked_ideas[:1]
-                if pool_size > 0:
-                    self.data_strategy.replacement_ideas= self.data_strategy.ranked_ideas[1:1+pool_size]
-                    self.data_strategy.left= self.data_strategy.ranked_ideas[1+pool_size:]
-                else:
-                    self.data_strategy.replacement_ideas= []
-                    self.data_strategy.left= self.data_strategy.ranked_ideas[1:]
-        # selectionTop => do not init yet, will do in the loop if first_agent not set
-
-        if sel_method=="selectionTop": 
-            if not self.data_strategy.first_agent_name:
-                self.data_strategy.first_agent_name= agent.name
-                # AUT => that agent's top5 => current_ideas
-                if ttype=="AUT":
-                    idxs= self.data_strategy.agent_selected_ideas.get(agent.name, [])
-                    all_txt= self.data_strategy.all_ideas
-                    # convert idx -> text
-                    cIdeas=[]
-                    for i in idxs:
-                        if 0<= i< len(all_txt):
-                            cIdeas.append(all_txt[i]['idea'])
-                    cIdeas= cIdeas[:5]
-                    self.data_strategy.current_ideas= cIdeas
-                    self.data_strategy.agent_replacement_ideas[agent.name] = []  # or empty
-                else:
-                    # PS branch: use the config option for replacement agent picks.
-                    idxs= self.data_strategy.agent_selected_ideas.get(agent.name, [])
-                    sol_txt= [x['idea'] for x in self.data_strategy.all_ideas]
-                    c=[]
-                    rep=[]
-                    if idxs:
-                        if 0<= idxs[0]< len(sol_txt):
-                            c.append(sol_txt[idxs[0]])
-                        for x in idxs[1:]:
-                            if 0<=x< len(sol_txt):
-                                rep.append(sol_txt[x])
-                    self.data_strategy.current_ideas= c[:1]
-                    pool_size = self.task_config.get("replacement_pool_size", 3)
-                    if pool_size > 0:
-                        self.data_strategy.agent_replacement_ideas[agent.name]= rep[:pool_size]
-                    else:
-                        self.data_strategy.agent_replacement_ideas[agent.name]= []
-            else:
-                if agent.name not in self.data_strategy.agent_replacement_ideas:
-                    if ttype == "AUT":
-                        idxs = self.data_strategy.agent_selected_ideas.get(agent.name, [])
-                        all_txt = self.data_strategy.all_ideas
-                        self.data_strategy.agent_replacement_ideas[agent.name] = [
-                            all_txt[i]['idea'] for i in idxs if 0 <= i < len(all_txt)
-                        ][:5]
-                    else:  # PS case
-                        idxs = self.data_strategy.agent_selected_ideas.get(agent.name, [])
-                        sol_txt = [x['idea'] for i in idxs if 0 <= i < len(sol_txt)]
-                        rep = [sol_txt[i] for i in idxs if 0 <= i < len(sol_txt)]
-                        pool_size = self.task_config.get("replacement_pool_size", 3)
-                        self.data_strategy.agent_replacement_ideas[agent.name] = rep[:pool_size]
-
-        total_resp=0
-        while total_resp< self.max_responses:
-            remain= [ag for ag in self.conversation.agents if not self.data_strategy.agent_has_agreed(ag.name)]
+        total_resp = 0
+        while total_resp < self.max_responses:
+            remain = [ag for ag in self.conversation.agents if not self.data_strategy.agent_has_agreed(ag.name)]
             if not remain:
-                print("All agents agreed(all_at_once).")
+                print(f"All agents agreed (all_at_once, order: {disc_order}).")
                 self._print_final()
                 return
-            agent = self._select_next_agent(remain)
 
-            # if not first_agent_name => set it => if selectionTop => init from that agent picks
-            if sel_method=="selectionTop": 
-                if not self.data_strategy.first_agent_name:
-                    self.data_strategy.first_agent_name= agent.name
-                    # AUT => that agent's top5 => current_ideas
-                    if ttype=="AUT":
-                        idxs= self.data_strategy.agent_selected_ideas.get(agent.name, [])
-                        all_txt= self.data_strategy.all_ideas
-                        # convert idx -> text
-                        cIdeas=[]
-                        for i in idxs:
-                            if 0<= i< len(all_txt):
-                                cIdeas.append(all_txt[i]['idea'])
-                        cIdeas= cIdeas[:5]
-                        self.data_strategy.current_ideas= cIdeas
-                        self.data_strategy.agent_replacement_ideas[agent.name] = []  # or empty
-                    else:
-                        # PS => top3 => [0]= current, [1,2] => replacement
-                        idxs= self.data_strategy.agent_selected_ideas.get(agent.name, [])
-                        sol_txt= [x['idea'] for x in self.data_strategy.all_ideas]
-                        c=[]
-                        rep=[]
-                        if idxs:
-                            if 0<= idxs[0]< len(sol_txt):
-                                c.append(sol_txt[idxs[0]])
-                            for x in idxs[1:]:
-                                if 0<=x< len(sol_txt):
-                                    rep.append(sol_txt[x])
-                        self.data_strategy.current_ideas= c[:1]
+            # --- Initial Idea Setup (Run once, before agent selection/generation) ---
+            # This needs to happen regardless of order method, but only once.
+            if not initial_setup_done:
+                # Use the first available agent for setup reference if needed (esp. for selectionTop)
+                if not remain: # Should not happen if loop condition is met, but safety check
+                    print("Error: No remaining agents for initial setup. Breaking.")
+                    break
+                agent_for_setup_ref = remain[0]
+
+                if sel_method == "rating":
+                    if ttype == "AUT":
+                        self.data_strategy.current_ideas = self.data_strategy.ranked_ideas[:5]
+                        self.data_strategy.replacement_ideas = self.data_strategy.ranked_ideas[5:10]
+                        self.data_strategy.left = self.data_strategy.ranked_ideas[10:]
+                    else: # PS
                         pool_size = self.task_config.get("replacement_pool_size", 3)
+                        self.data_strategy.current_ideas = self.data_strategy.ranked_ideas[:1]
                         if pool_size > 0:
-                            self.data_strategy.agent_replacement_ideas[agent.name]= rep[:pool_size]
+                            self.data_strategy.replacement_ideas = self.data_strategy.ranked_ideas[1:1 + pool_size]
+                            self.data_strategy.left = self.data_strategy.ranked_ideas[1 + pool_size:]
                         else:
-                            self.data_strategy.agent_replacement_ideas[agent.name]= []
+                            self.data_strategy.replacement_ideas = []
+                            self.data_strategy.left = self.data_strategy.ranked_ideas[1:]
+                    initial_setup_done = True
+
+                elif sel_method == "selectionTop":
+                    # Use the reference agent to establish the initial state for the round
+                    if not self.data_strategy.first_agent_name:
+                        # Set the anchor agent name based on the first agent in 'remain' this round
+                        self.data_strategy.first_agent_name = agent_for_setup_ref.name
+
+                    # Perform setup using the established first_agent_name's preferences
+                    # Ensure all_ideas is populated (might happen if skipping phases)
+                    if not hasattr(self.data_strategy, 'all_ideas') or not self.data_strategy.all_ideas:
+                         print("Warning: selectionTop requires self.data_strategy.all_ideas, which is empty. Cannot initialize ideas.")
+                         # Handle this error state - maybe break or use a default?
+                         # For now, we'll let it potentially fail below if agent_selected_ideas access empty all_ideas
+                         all_idea_texts = []
+                    else:
+                        all_idea_texts = [idea['idea'] for idea in self.data_strategy.all_ideas]
+
+                    # Ensure agent_selected_ideas is populated
+                    if not hasattr(self.data_strategy, 'agent_selected_ideas'):
+                         self.data_strategy.agent_selected_ideas = {} # Initialize if missing
+
+                    first_agent_picks = self.data_strategy.agent_selected_ideas.get(self.data_strategy.first_agent_name, [])
+
+
+                    if ttype == "AUT":
+                        current_ideas = [all_idea_texts[i] for i in first_agent_picks if 0 <= i < len(all_idea_texts)][:5]
+                        self.data_strategy.current_ideas = current_ideas
+                        # Ensure replacement ideas are populated for all agents if needed later
+                        if not hasattr(self.data_strategy, 'agent_replacement_ideas'):
+                            self.data_strategy.agent_replacement_ideas = {}
+                        for ag in self.conversation.agents:
+                           if ag.name not in self.data_strategy.agent_replacement_ideas:
+                               idxs = self.data_strategy.agent_selected_ideas.get(ag.name, [])
+                               self.data_strategy.agent_replacement_ideas[ag.name] = [
+                                   all_idea_texts[i] for i in idxs if 0 <= i < len(all_idea_texts)
+                               ][:5] # AUT uses top 5 as potential replacements
+                    else: # PS
+                        current_ideas = []
+                        pool_size = self.task_config.get("replacement_pool_size", 3)
+                        if first_agent_picks:
+                           if 0 <= first_agent_picks[0] < len(all_idea_texts):
+                               current_ideas.append(all_idea_texts[first_agent_picks[0]])
+
+                        self.data_strategy.current_ideas = current_ideas[:1] # Ensure only one current idea for PS
+                        # Ensure replacement ideas are populated for all agents
+                        if not hasattr(self.data_strategy, 'agent_replacement_ideas'):
+                            self.data_strategy.agent_replacement_ideas = {}
+                        for ag in self.conversation.agents:
+                            if ag.name not in self.data_strategy.agent_replacement_ideas:
+                                idxs = self.data_strategy.agent_selected_ideas.get(ag.name, [])
+                                agent_replacements = [all_idea_texts[i] for i in idxs[1:] if 0 <= i < len(all_idea_texts)][:pool_size]
+                                self.data_strategy.agent_replacement_ideas[ag.name] = agent_replacements
+
+                    initial_setup_done = True # Mark setup as done for this discussion
+
+            # --- Branch based on Discussion Order Method ---
+            selected_agent = None
+            selected_response = None
+            selected_messages = None
+            generation_pt, generation_ct, generation_rt = 0, 0, 0 # Tokens for the *chosen* speaker's generation
+
+            if disc_order == "hand_raising":
+                # --- New Hand-Raising Logic ---
+                print(f"\n--- Round {total_resp + 1}: Hand-Raising Protocol ---")
+                # Step 1: Generate Potential Responses
+                potential_responses = {}
+                print("  Generating Potential Responses...")
+                for agent in remain:
+                    self.conversation.current_agent = agent # Context for message generation
+                    msgs = self.message_strategy.construct_messages(
+                        agent, 'discussion', self.conversation,
+                        total_resp=total_resp, max_rounds=self.max_responses
+                    )
+                    resp, pt, ct, rt = agent.generate_response(msgs)
+                    potential_responses[agent.name] = {
+                        "response": resp, "prompt_tokens": pt, "completion_tokens": ct,
+                        "reasoning_tokens": rt, "messages": msgs
+                    }
+                    # print(f"    {agent.name} potential: {resp[:80]}...") # Optional: Log snippet
+
+                # Step 2: Generate Intention Scores
+                intention_scores = {}
+                print("  Generating Intention Scores...")
+                total_intention_pt, total_intention_ct, total_intention_rt = 0, 0, 0
+                for agent in remain:
+                    self.conversation.current_agent = agent # Context for message generation
+                    agent_potential_response = potential_responses[agent.name]["response"]
+                    history = self.conversation.get_previous_responses(current_phase="discussion", history_depth=10) # Adjust depth as needed
+                    history_text = "\n".join(history) if history else "(Start of Discussion)"
+                    # Define the intention prompt (consider moving to prompts.py)
+                    # Define the intention prompt (Focused on CREATIVITY)
+                    intention_prompt = (
+                        f"**Overall Goal:** Generate the MOST CREATIVE idea.\n\n"
+                        f"**Discussion Context:**\n{history_text}\n\n"
+                        f"**Your Potential Contribution:**\n{agent_potential_response}\n\n"
+                        f"---\n"
+                        f"**Task:** CRITICALLY evaluate the magnitude of the CREATIVE LEAP your contribution offers *at this specific moment*. Is it truly pushing the boundaries with significant novelty/synthesis, or is it primarily a refinement, logical extension, or safe addition?\n\n"
+                        f"Rate the IMMEDIATE CREATIVE JUMP on a scale of 0 to 10:\n"
+                        f"*   **0-2 (Minimal/None):** Simple agreement, minor clarification, feasibility focus, repeats prior creative concepts, adds no significant novelty.\n"
+                        f"*   **3-5 (Incremental Improvement):** Builds logically on the last idea, offers a slight variation, combines existing elements predictably, asks a useful but standard question. *This is NOT a high-impact creative move.*\n"
+                        f"*   **6-7 (Noticeable Novelty):** Introduces a distinct new element or perspective, offers a non-obvious connection/twist, suggests a moderately unexpected direction.\n"
+                        f"*   **8-9 (Significant Creative Leap):** Presents a genuinely novel core concept/mechanism, offers a surprising and insightful synthesis, significantly reframes the idea, opens *multiple* new creative avenues.\n"
+                        f"*   **10 (Transformative Breakthrough):** A true paradigm shift for the discussion. Radically challenges assumptions or redefines the problem/solution space in a highly original and promising way. *Reserve ONLY for revolutionary contributions.*\n\n"
+                        f"Be HONEST and STRICT in your self-assessment. High scores (8+) require substantial, demonstrable creative advancement *now*, not just potential. Respond ONLY with the numerical score (e.g., '6')."
+                    )
+                    model = agent.model_name
+                    role = "user" if model in ['o3-mini', 'o1', 'o1-mini', "deepseek-ai/DeepSeek-R1", "gemini-2.0-flash-thinking-exp"] else "system" # Adjust as needed
+                    intention_msgs = [{"role": role, "content": intention_prompt}]
+
+                    score_resp, ipt, ict, irt = agent.generate_response(intention_msgs)
+
+                    # Parse the score
+                    score = 0 # Default score
+                    try:
+                        match = re.search(r'\d+', score_resp)
+                        if match:
+                            score = int(match.group(0))
+                            score = max(1, min(10, score)) # Clamp score to range 1-10
+                        else:
+                             print(f"    Warning: Could not parse score from '{score_resp}' for {agent.name}. Defaulting to 0.")
+                    except Exception as e:
+                        print(f"    Warning: Error parsing score for {agent.name} ('{score_resp}'): {e}. Defaulting to 0.")
+
+                    intention_scores[agent.name] = {
+                        "score": score,
+                        "raw_response": score_resp,
+                        "prompt_tokens": ipt,
+                        "completion_tokens": ict,
+                        "reasoning_tokens": irt,
+                        "messages": intention_msgs # For logging
+                    }
+                    # Accumulate intention token usage immediately
+                    total_intention_pt += ipt
+                    total_intention_ct += ict
+                    total_intention_rt += irt
+                    # print(f"    {agent.name} intention score: {score} (Raw: '{score_resp}')") # Optional: Log score
+
+                # Update total phase token usage for *all* intention calls this round
+                self.conversation.update_phase_token_usage("discussion", total_intention_pt, total_intention_ct, total_intention_rt)
+
+                # (Optional but recommended) Log the intention scoring results for transparency
+                for name, data in intention_scores.items():
+                     # Find the agent object to get model name
+                     agent_obj = next((ag for ag in remain if ag.name == name), None)
+                     if agent_obj:
+                         self.conversation.add_chat_entry(
+                             agent_obj.model_name, name,
+                             "\n".join(m['content'] for m in data["messages"]),
+                             data["raw_response"] + f" (Parsed: {data['score']})",
+                             'intention_scoring', # Use a distinct phase name for logging
+                             round_number=total_resp + 1
+                         )
+
+                # Step 3: Select the Speaker
+                if not intention_scores:
+                    print("  Warning: No intention scores generated. Picking random agent.")
+                    if not remain: # Safety check
+                        print("Error: No remaining agents to pick from. Breaking.")
+                        break
+                    selected_agent = random.choice(remain)
+                    selected_agent_name = selected_agent.name
+                    max_score = "N/A"
                 else:
-                    if agent.name not in self.data_strategy.agent_replacement_ideas:
-                        if ttype == "AUT":
-                            idxs = self.data_strategy.agent_selected_ideas.get(agent.name, [])
-                            all_txt = self.data_strategy.all_ideas
-                            self.data_strategy.agent_replacement_ideas[agent.name] = [
-                                all_txt[i]['idea'] for i in idxs if 0 <= i < len(all_txt)
-                            ][:5]
-                        else:  # PS case
-                            idxs = self.data_strategy.agent_selected_ideas.get(agent.name, [])
-                            sol_txt = [x['idea'] for x in self.data_strategy.all_ideas]
-                            self.data_strategy.agent_replacement_ideas[agent.name] = [
-                                sol_txt[i] for i in idxs if 0 <= i < len(sol_txt)
-                            ][:3]
-            self.conversation.current_agent= agent
-            msgs= self.message_strategy.construct_messages(agent,'discussion',self.conversation,total_resp=total_resp)
-            resp, prompt_tokens, completion_tokens, reasoning_tokens = agent.generate_response(msgs)
-            self.conversation.add_chat_entry(agent.model_name,agent.name, "\n".join(m['content'] for m in msgs), resp, 'discussion',current_ideas=self.data_strategy.current_ideas,round_number=total_resp+1)
+                    max_score = max(data["score"] for data in intention_scores.values()) if intention_scores else 0
+                    top_agents_names = [name for name, data in intention_scores.items() if data["score"] == max_score]
+                    if not top_agents_names: # Handle case where all scores were 0 or parsing failed for all
+                        print("  Warning: No agents with positive scores found. Picking randomly from remaining.")
+                        if not remain: break # Break if no agents left
+                        selected_agent = random.choice(remain)
+                        selected_agent_name = selected_agent.name
+                    else:
+                        selected_agent_name = random.choice(top_agents_names)
+                        selected_agent = next(agent for agent in remain if agent.name == selected_agent_name)
 
-            # Update token usage
-            self.conversation.update_phase_token_usage("discussion",prompt_tokens, completion_tokens, reasoning_tokens)
+                print(f"  Selected Speaker: {selected_agent_name} (Score: {max_score})")
 
-            print(f"[all_at_once] {agent.name} => {resp}")
+                # Step 4: Prepare selected agent's data for commit
+                # Ensure the selected agent actually generated a potential response
+                if selected_agent_name not in potential_responses:
+                    print(f"Error: Selected agent {selected_agent_name} did not have a potential response recorded. Skipping turn.")
+                    # Decide how to handle: continue to next iteration, break, etc.
+                    total_resp += 1 # Avoid potential infinite loop
+                    continue # Skip the commit stage for this round
 
-            self.data_strategy.update_shared_data(self.conversation, resp)
-            total_resp+=1
+                selected_data = potential_responses[selected_agent_name]
+                selected_response = selected_data["response"]
+                selected_messages = selected_data["messages"]
+                generation_pt = selected_data["prompt_tokens"]
+                generation_ct = selected_data["completion_tokens"]
+                generation_rt = selected_data["reasoning_tokens"]
 
-            if self.data_strategy.all_agents_agreed(self.conversation.agents):
-                print("All agents agreed(all_at_once).")
-                self._print_final()
-                return
+            else:
+                # --- Original Logic (Fixed or Random) ---
+                print(f"\n--- Round {total_resp + 1}: Selecting Speaker via '{disc_order}' ---")
+                # Step 1: Select the Speaker using the appropriate method
+                selected_agent = self._select_next_agent(remain) # Handles fixed/random based on config
+                if not selected_agent: # Should not happen if remain is not empty
+                     print("Error: _select_next_agent returned None. Breaking.")
+                     break
+                print(f"  Selected Speaker: {selected_agent.name}")
+                self.conversation.current_agent = selected_agent
 
-        print("max responses(all_at_once) => no full agreement.")
+                # Step 2: Generate Response for the selected agent
+                selected_messages = self.message_strategy.construct_messages(
+                    selected_agent, 'discussion', self.conversation,
+                    total_resp=total_resp, max_rounds=self.max_responses
+                )
+                selected_response, generation_pt, generation_ct, generation_rt = selected_agent.generate_response(selected_messages)
+
+
+            # --- Commit Stage (Common for both branches) ---
+            if selected_agent and selected_response is not None:
+                # Add the *selected* agent's generation response to history
+                self.conversation.add_chat_entry(
+                    selected_agent.model_name,
+                    selected_agent.name,
+                    "\n".join(m['content'] for m in selected_messages),
+                    selected_response,
+                    'discussion',
+                    current_ideas=self.data_strategy.current_ideas, # Log current state
+                    round_number=total_resp + 1
+                )
+
+                # Update token usage for the *selected* agent's *generation* call
+                self.conversation.update_phase_token_usage("discussion", generation_pt, generation_ct, generation_rt)
+
+                print(f"[{disc_order}] {selected_agent.name} => {selected_response}")
+
+                # Update shared data using the *selected* response
+                self.data_strategy.update_shared_data(self.conversation, selected_response)
+
+                total_resp += 1
+
+                # Check agreement *after* the selected agent has spoken and state updated
+                if self.data_strategy.all_agents_agreed(self.conversation.agents):
+                    print(f"All agents agreed (all_at_once, order: {disc_order}).")
+                    self._print_final()
+                    return
+            else:
+                 # This case might happen if generation failed or selection failed unexpectedly
+                 print(f"Warning: No valid response generated or agent selected in round {total_resp + 1}. Skipping round.")
+                 # Increment to prevent potential infinite loop if issue persists
+                 total_resp += 1
+
+        # Loop finished (max responses reached)
+        print(f"Max responses ({self.max_responses}) reached (all_at_once, order: {disc_order}) => no full agreement or discussion limit hit.")
         self._print_final()
 
     def discussion_one_by_one(self):
@@ -781,7 +1104,7 @@ class GenericDiscussionMode:
             agent = self._select_next_agent(remain)
             self.conversation.current_agent = agent
 
-            msgs = self.message_strategy.construct_messages(agent, 'direct_discussion', self.conversation, total_resp=total_resp)
+            msgs = self.message_strategy.construct_messages(agent, 'direct_discussion', self.conversation, total_resp=total_resp,max_rounds=self.max_responses)
             resp, prompt_tokens, completion_tokens, reasoning_tokens = agent.generate_response(msgs)
             if total_resp == 0:
                 self.data_strategy.current_ideas = [resp]
@@ -875,7 +1198,7 @@ class GenericDiscussionMode:
                 break
             agent = self._select_next_agent(remain)
             self.conversation.current_agent = agent
-            msgs = self.message_strategy.construct_messages(agent, "direct_discussion", self.conversation, total_resp=total_resp, current_round = total_resp+1)
+            msgs = self.message_strategy.construct_messages(agent, "direct_discussion", self.conversation, total_resp=total_resp,max_rounds=self.max_responses)
             resp, prompt_tokens, completion_tokens, reasoning_tokens = agent.generate_response(msgs)
             if total_resp == 0:
                 self.data_strategy.current_ideas = [resp]
@@ -909,6 +1232,7 @@ class GenericDiscussionMode:
             self.conversation.current_agent = agent
             msgs = self.message_strategy.construct_messages(agent, "discussion", self.conversation, include_intention_prompt=True)
             resp, prompt_tokens, completion_tokens,reasoning_tokens = agent.generate_response(msgs)
+
             try:
                 self.data_strategy.collect_intention_score(agent.name, resp)
                 self.conversation.add_chat_entry(agent.model_name, agent.name, "\n".join(m["content"] for m in msgs), resp, "intention_score")
@@ -924,21 +1248,46 @@ class GenericDiscussionMode:
 
     def _select_next_agent(self, remain):
         """
-        Selects the next agent based on the discussion order method.
+        Selects the next agent based on 'fixed' or 'random' order.
+        Handles the round-robin ('fixed') or random choice.
+        Does NOT handle 'hand_raising'.
         """
         disc_order = self.task_config.get("discussion_order_method", "fixed")
-        if disc_order == "hand_raising":
-            return self._select_agent_by_intention(remain)
-        elif disc_order == "random":
+
+        if not remain:
+             print("Warning: _select_next_agent called with no remaining agents.")
+             return None # No agent to select
+
+        if disc_order == "random":
+            # print("DEBUG: Selecting next agent randomly")
             return random.choice(remain)
-        else:
+        elif disc_order == "fixed":
+            # print("DEBUG: Selecting next agent via fixed order")
             agents = self.conversation.agents
             current_agent = self.conversation.current_agent
-            start_index = agents.index(current_agent) if current_agent else -1
+            # Find start index robustly
+            start_index = -1
+            if current_agent:
+                try:
+                    start_index = agents.index(current_agent)
+                except ValueError:
+                    # This can happen if current_agent was from a previous phase or dynamically added/removed
+                    print(f"Warning: current_agent {current_agent.name} not found in agents list for fixed order. Resetting index.")
+                    start_index = -1 # Fallback to start from beginning
 
-            for i in range(start_index + 1, len(agents)):
-                if agents[i] in remain:
-                    return agents[i]
-            for i in range(0, start_index + 1):
-                if agents[i] in remain:
-                    return agents[i]
+            # Iterate through agents in fixed order, starting after current
+            for i in range(1, len(agents) + 1):
+                next_index = (start_index + i) % len(agents)
+                # Check if the agent at the next index is in the 'remain' list
+                if agents[next_index] in remain:
+                    return agents[next_index]
+
+            # Fallback: Should only happen if 'remain' has agents not in the original 'self.conversation.agents' list,
+            # or if there's a logic error.
+            print(f"Warning: Fixed order selection failed to find a valid agent in 'remain'. Falling back to random choice from 'remain'.")
+            return random.choice(remain)
+        else:
+            # If discussion_order_method is 'hand_raising' or unsupported, this function shouldn't be called
+            # by discussion_all_at_once's non-hand-raising branch. Log error and default.
+            print(f"Error: _select_next_agent called with unsupported order '{disc_order}'. Falling back to random choice from 'remain'.")
+            return random.choice(remain)

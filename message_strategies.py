@@ -37,6 +37,8 @@ class GenericMessageStrategy:
             self._add_generation_instructions(msgs, agent, conversation)
         elif phase=="selection":
             self._add_selection_instructions(msgs, agent, conversation)
+        elif phase=="selection_novelty":
+            self._add_selection_instructions_novelty(msgs, agent, conversation)
         elif phase=="iterative_refinement":
             self._add_iterative_refinement_instructions(msgs, agent, conversation)
         elif phase=="discussion":
@@ -46,6 +48,7 @@ class GenericMessageStrategy:
                     intention_prompt = TASK_REQUIREMENTS["Intention_Prompt_Idea"]
                 else:
                     intention_prompt = TASK_REQUIREMENTS["Intention_Prompt_Ideas"]
+
                 msgs.append({"role": "user", "content": "\n\n"+intention_prompt.strip()})
         elif phase == "direct_discussion":
             self._add_direct_discussion_instructions(msgs, agent, conversation, total_resp, current_round)
@@ -54,6 +57,10 @@ class GenericMessageStrategy:
                 msgs.append({"role": "user", "content": "\n\n"+intention_prompt.strip()})
         elif phase == "open_discussion":
             self._add_open_discussion_instructions(msgs, agent, conversation, current_round, max_rounds)
+        elif phase=="creative_generation":
+            self._add_creative_generation_instructions(msgs, agent, conversation)
+        elif phase=="practical_discussion":
+            self._add_practical_discussion_instructions(msgs, agent, conversation, idea_index, total_resp=total_resp,current_round=current_round, max_rounds=max_rounds)
 
         return msgs
     
@@ -117,6 +124,22 @@ class GenericMessageStrategy:
             else:
                 msgs.append({"role":"user","content": f"\n# **Current Task**\n{TASK_REQUIREMENTS['PS_Selection_SelectionTop'].strip()}"})
 
+
+    def _add_selection_instructions_novelty(self, msgs, agent, conversation):
+        sel_method= self.task_config.get("selection_method","rating")
+        ttype= self.task_config.get("task_type","AUT")
+
+        if ttype=="AUT":
+            if sel_method=="rating":
+                pass
+            else:
+                pass
+        else:
+            if sel_method=="rating":
+                msgs.append({"role":"user","content": f"\n# **Current Task**\n{TASK_REQUIREMENTS['PS_Selection_Rating_Novelty'].strip()}"})
+            else:
+                pass
+
     def _add_discussion_instructions(self, msgs, agent, conversation, idea_index, total_resp=None, current_round=None, max_rounds=None):
         """
         Modify discussion phase instructions to integrate previous responses and to 
@@ -169,15 +192,18 @@ class GenericMessageStrategy:
                     prompt = TASK_REQUIREMENTS["PS_Discussion_Rating"]
             else:
                 prompt = TASK_REQUIREMENTS["PS_Discussion_SelectionTop"]
-            prompt = prompt.replace("{{total_resp}}", str(total_resp + 1))
-            prompt = prompt.replace("{{max_rounds}}", str(self.task_config.get("max_rounds", 20)))
+            # Safe replacements for template variables
+            if "{{total_resp}}" in prompt:
+                prompt = prompt.replace("{{total_resp}}", str((total_resp or 0) + 1))
+            if "{{max_rounds}}" in prompt:
+                prompt = prompt.replace("{{max_rounds}}", str(self.task_config.get("max_rounds", 20)))
 
         # Display task-specific prompt first
         
         msgs.append({"role": role, "content": f"\n# **Current Task**\n{prompt.strip()}"})
 
         # Insert previous responses before current and replacement ideas
-        msgs.append({"role": "user", "content": "\n# **Disucssion History**\nBelow is the discussion history for the past three rounds. Other team members' feedback on these ideas so far (last 3 responses, in chronological order):\n" + history_str +"\n"})
+        msgs.append({"role": "user", "content": "\n# **Discussion History**\nBelow is the discussion history for the past three rounds. Other team members' feedback on these ideas so far (last 3 responses, in chronological order):\n" + history_str +"\n"})
 
         current_ideas_str = "\n".join(f"{i+1}. {txt}" for i, txt in enumerate(self.data_strategy.current_ideas))
         replacement_ideas_str = self.get_replacement_ideas_str(agent, sel_method)
@@ -194,7 +220,7 @@ class GenericMessageStrategy:
             "**Current Ideas Under Discussion:**\n"
             f"{current_ideas_str if current_ideas_str else '(None)'}\n\n"
             
-            "**Replacement Ideas (yours):**\n"
+            "**Replacement Ideas Pool (yours):**\n"
             f"{replacement_ideas_str if replacement_ideas_str else '(None)'}"
             f"{replaced_ideas_section}" 
         })
@@ -259,7 +285,7 @@ class GenericMessageStrategy:
 
         # Construct message content
         msgs.append({"role": role, "content": f"\n# **Current Task**\n{prompt.strip()}"})
-        msgs.append({"role": "user", "content": f"\n# **Disucssion History**\nBelow is the discussion history for the past three rounds. Other team members' feedback on these ideas so far (last 3 responses, in chronological order): \n\n{history_str}"})
+        msgs.append({"role": "user", "content": f"\n# **Discussion History**\nBelow is the discussion history for the past three rounds. Other team members' feedback on these ideas so far (last 3 responses, in chronological order): \n\n{history_str}"})
 
         # Add current and replacement ideas
         if total_resp == 0 or (disc_method == 'one_by_one' and current_round == 1):
@@ -278,20 +304,20 @@ class GenericMessageStrategy:
             round_info = f"Current Round: {current_round} of {total_rounds}\n"
             final_round_threshold = 5 # Or 3, adjust as needed
             
-            if total_rounds - current_round < final_round_threshold:
-                is_final_rounds = True
-                instruction_header = "# **Instruction: Final Rounds - Drive Towards Agreement**\n" # More specific header
+            if (total_rounds - current_round) < final_round_threshold:
+                is_final_rounds = True 
+
+            if is_final_rounds:
+                """Remember to change this back"""
+                instruction_header = "# **Instruction: Final Rounds - Converge Towards a Single Final Idea**\n" # More specific header
                 # Create the dedicated agreement section
                 agreement_focus_section = (
                     "---\n"
-                    "**URGENT: FOCUS ON AGREEMENT**\n"
-                    f"You are in the final {final_round_threshold} rounds. Your primary objective now is to **actively work towards reaching an agreement or concrete proposal.**\n"
-                    "**Action Items for this round:**\n"
-                    "1.  **Summarize** points of agreement and disagreement based on the history below.\n"
-                    "2.  **Propose** specific compromises, solutions, or next steps towards resolution.\n"
-                    "3.  **Ask** targeted questions ONLY to resolve remaining differences needed for agreement.\n"
-                    "4.  **Avoid** introducing new, unrelated topics.\n"
-                    "Review the history below with this goal in mind.\n"
+                    f"**Nearing the End ({total_rounds - current_round + 1} rounds remaining):**\n"
+                    "The discussion should now strongly **focus on converging towards the single most promising and creative idea.**\n"
+                    "Prioritize refining potential candidates to meet the task requirements.\n"
+                    "Collaboratively polish the idea you want to propose as the final output.\n"
+                    "Introducing entirely new directions at this stage is not allowed.\n"
                     "---\n"
                 )
 
@@ -299,14 +325,16 @@ class GenericMessageStrategy:
         if is_final_rounds:
              # In final rounds, the focus isn't really "share freely" anymore
              base_instruction_body = (
-                 "Use the discussion history below to formulate a response that moves towards agreement, following the action items listed above.\n"
-                 "--- Discussion History ---\n"
+                "Review the discussion history below. Use your response to help the group select and refine the best idea, keeping the final goal and criteria in mind.\n"
+                "--- Discussion History ---\n"
              )
         else:
             base_instruction_body = (
-                 "In this open discussion phase, please share your thoughts freely to explore the topic. "
-                 "Build upon previous points and share your perspective.\n"
-                 "--- Discussion History ---\n"
+                "In this open discussion phase, please share your thoughts freely to explore the topic.\n"
+                "**Formatting Instruction:** Structure your response clearly.\n"
+                "**Vary your format** – use paragraphs for detailed thoughts or arguments. Use lists *sparingly* and only when needed for clear, brief enumeration of distinct items.\n"
+                "Build upon previous points and share your perspective.\n"
+                "--- Discussion History ---\n"
              )
 
         # Append history
@@ -327,6 +355,75 @@ class GenericMessageStrategy:
         
         logging.info(f"Open discussion instructions added (Final Rounds: {is_final_rounds}), "
                      f"current_round={current_round}, total_rounds={total_rounds}")
+        
+
+
+
+    def _add_open_discussion_instructions(self, msgs, agent, conversation, current_round=None, total_rounds=None):
+        """
+        Adds ultra-minimalist open discussion instructions, primarily context + agent prompt,
+        but includes a simple notification for the final rounds.
+        Modifies msgs list in place.
+        """
+        final_rounds_warning = ""
+        is_final_rounds = False
+        final_round_threshold = 5 # Notify within the last 5 rounds
+        instruction_header = (
+            "In terms of formatting, you should not use lists or bullet points unless absolutely necessary.\n"
+            )
+
+
+        # --- Check for Final Rounds ---
+        if current_round is not None and total_rounds is not None:
+            rounds_remaining = total_rounds - current_round + 1
+            # Check if within the threshold (using <= because rounds_remaining includes the current round)
+            if rounds_remaining <= final_round_threshold:
+                is_final_rounds = True
+                # Simple, purely informational warning - no convergence instructions
+                final_rounds_warning = (
+                    f"\n---\n"
+                    f"**Note:** Nearing end of discussion ({rounds_remaining} round(s) remaining including this one).\n"
+                    f"---\n"
+                )
+
+        # --- History Section (Core Context) ---
+        # Present history clearly FIRST - setting the immediate context
+        history = conversation.get_previous_responses(current_phase="open_discussion")
+        # Use a slightly more descriptive placeholder if empty
+        history_text = "\n".join(history) if history else "(Start of the open discussion phase)"
+        history_section = (
+            f"**Discussion So Far:**\n"
+            f"{history_text}\n"
+            # Separator moved here, before the optional warning/final prompt
+            "---\n"
+        )
+
+        # --- Final Instruction Prompt (Minimalist) ---
+        # Identify the agent and ask for their response directly
+        # Using agent.role assumes it exists and is useful context, otherwise just use agent.name
+        agent_identifier = f"{agent.name}" + (f" ({agent.role})" if hasattr(agent, 'role') and agent.role else "")
+        final_instruction_prompt = f"Now, **{agent_identifier}:** Your response?"
+
+
+        # --- Assemble the Full Prompt Content ---
+        # Order: History -> Optional Warning -> Final Agent Prompt
+        full_instruction_content = (
+            instruction_header +
+            history_section +
+            final_rounds_warning + # Appears only if is_final_rounds is True
+            final_instruction_prompt
+        )
+
+        # Append the constructed message to the list
+        msgs.append({"role": "user", "content": full_instruction_content})
+
+        # Update logging to reflect the minimalist approach and final round status
+        log_message = f"Minimalist open discussion instructions added for {agent.name}"
+        if current_round is not None:
+             log_message += f" (Round {current_round})"
+        if is_final_rounds:
+             log_message += " - Final rounds notification included."
+        logging.info(log_message)
 
     def _add_iterative_refinement_instructions(self, msgs, agent, conversation):
         """
@@ -341,46 +438,63 @@ class GenericMessageStrategy:
         task_type = self.task_config.get("task_type", "AUT")
         
         # 1. Add the main instructions
-        instruction = """# **Iterative Idea Refinement**
-Your goal is to generate ONE significantly improved and novel idea based on the provided context. Analyze the current idea(s) and discussion, identify weaknesses or opportunities, and create a superior alternative.
-
-**Process:**
-1.  **Review Current Idea(s):** Understand the core concept, strengths, and weaknesses of the idea(s) presented below.
-2.  **Analyze Previous Discussion:** Identify key insights, critiques, suggestions, and unresolved points from the discussion context.
-3. Create a new idea that is:
-   - More original, useful, and novel
-   - Addresses any limitations of the current idea(s)
-   - Builds on discussion insights
-   - Is clearly articulated and implementable
-   - The idea should be around 80-100 words.
-
+        instruction = """
+Your goal is to generate ONE significantly more creative idea that has to be different from current ideas. 
 **Important:** 
 - Focus on quality over quantity - create ONE excellent idea rather than multiple ideas
-- Ensure your response is in valid, parseable JSON format with these exact field names
-- Use proper escaping for any quotes within JSON strings (e.g., \\" for quotes inside strings)
-- Structure your response in valid JSON format as follows:
-{ "Thinking": "Your detailed thought process and reasoning here, including how this idea improves upon existing ones", "Idea": "Your concise, clear idea statement here" }
-
+- Respond with just the idea itself - no additional text or explanations.
 """
         msgs.append({"role": role, "content": instruction})
         
-        current_round = conversation.data_strategy.current_idea_index + 1 if hasattr(conversation.data_strategy, "current_idea_index") else 1
-        max_rounds = self.task_config.get("max_responses", 15)  # Get the max_responses from task_config
-        round_info = f"Round: {current_round} of {max_rounds}"
-        msgs.append({"role": "user", "content": f"# **Round Information**\n{round_info}"})
+        """
+        Remove round information in this iterative refinement mode
+        """
+        #current_round = conversation.data_strategy.current_idea_index + 1 if hasattr(conversation.data_strategy, "current_idea_index") else 1
+        #max_rounds = self.task_config.get("max_responses", 15)  # Get the max_responses from task_config
+        #round_info = f"Round: {current_round} of {max_rounds}"
+        #msgs.append({"role": "user", "content": f"# **Round Information**\n{round_info}"})
 
         # 2. Add current ideas section
-        current_ideas = conversation.data_strategy.current_ideas + conversation.data_strategy.replacement_ideas
+        current_ideas = conversation.data_strategy.all_generated_ideas
         if current_ideas:
             current_ideas_formatted = "\n".join([f"{i+1}. {idea}" for i, idea in enumerate(current_ideas)])
             msgs.append({"role": "user", "content": f"# **Current Idea(s)**\n{current_ideas_formatted}"})
         
-        # 3. Add previous discussion context
-        prior_context = conversation.get_previous_responses(current_phase="discussion")
-        if prior_context:
-            msgs.append({"role": "user", "content": "# **Previous Discussion Context**\n" + "\n".join(prior_context)})
         
         # 4. Final prompt for generation
-        msgs.append({"role": "user", "content": "Please generate a new idea that is significantly better and more novel than the current idea(s). Be creative but practical."})
+        msgs.append({"role": "user", "content": "Please generate a new idea that is significantly more creative than these existing idea(s)."})
         
         return msgs
+    def _add_creative_generation_instructions(self, msgs, agent, conversation):
+        # Get any creative generation history
+        # Get ranked ideas
+        ranked_ideas = self.data_strategy.ranked_ideas
+        if ranked_ideas:
+            ideas_str = "\n".join(f"{i+1}. {idea}" for i, idea in enumerate(ranked_ideas))
+        else:
+            ideas_str = "No ranked ideas available."
+            
+        # Get the creative prompt from TASK_REQUIREMENTS
+        creative_prompt = TASK_REQUIREMENTS.get("Creative_Idea_Generation", "Please propose creative ideas.").strip()
+        
+        # Combine creative prompt, history and ranked ideas
+        full_prompt = (
+            f"{creative_prompt}\n\n"
+            f"Existing Ideas:\n{ideas_str}"
+        )
+        msgs.append({"role": "user", "content": full_prompt})
+    
+    def _add_practical_discussion_instructions(self, msgs, agent, conversation, idea_index, total_resp=None, current_round=None, max_rounds=None):
+        """
+        Add discussion instructions for improvement focused on practicality.
+        """
+        # Here we use a new prompt (assumed to be provided in TASK_REQUIREMENTS)
+        prompt = TASK_REQUIREMENTS.get("Practical_Improvement", "Please propose a practical improvement for the current idea.")
+            # Replace template placeholders
+        msgs.append({"role": "user", "content": f"\n# **Current Task**\n{prompt.strip()}"})
+        
+        # Append current ideas (if any)
+        current_ideas_str = "\n".join(f"{i+1}. {txt}" for i, txt in enumerate(self.data_strategy.current_ideas))
+        msgs.append({"role": "user", "content": f"\n# **Current Ideas Under Discussion:**\n{current_ideas_str if current_ideas_str else '(None)'}"})
+        return
+

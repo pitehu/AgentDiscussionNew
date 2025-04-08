@@ -99,9 +99,9 @@ class Conversation:
             )
         return summary
 
-    def get_previous_responses(self, idea_index=None, current_phase=None):
+    def get_previous_responses(self, idea_index=None, current_phase=None, history_depth=3):
         previous_responses = []
-        n_minus_3_ideas = None
+        n_minus_n_ideas = None
 
         # Include entries that match the given current_phase, including "open_discussion".
         filtered_history = [entry for entry in self.chat_history if not current_phase or entry["phase"] == current_phase]
@@ -110,13 +110,16 @@ class Conversation:
 
         # Update condition to include open_discussion.
         if current_phase in ["discussion", "direct_discussion", "open_discussion"]:
-            # Extract n_minus_3_ideas with different conditions for discussion/direct_discussion/open_discussion
+            # Extract ideas with different conditions for discussion/direct_discussion/open_discussion
+            if history_depth is None:
+                target_index = 0  # Get from the very beginning
+
             if current_phase == "direct_discussion":
-                target_index = 0 if chat_length < 5 else chat_length - 3
+                target_index = 0 if chat_length < (history_depth + 2) else chat_length - history_depth
             elif current_phase in ["discussion", "open_discussion"]:
-                target_index = 0 if chat_length < 4 else chat_length - 3
+                target_index = 0 if chat_length < (history_depth + 1) else chat_length - history_depth
             if 0 <= target_index < chat_length:
-                n_minus_3_ideas = filtered_history[target_index].get("current_ideas", [])
+                n_minus_n_ideas = filtered_history[target_index].get("current_ideas", [])
 
         if current_phase == "direct_discussion":
             history_to_use = filtered_history[1:] if chat_length > 1 else []
@@ -143,12 +146,11 @@ class Conversation:
 
         previous_responses = list(reversed(previous_responses))  # Reverse to maintain chronological order
 
-        if current_phase in ["discussion", "direct_discussion", "open_discussion"] and n_minus_3_ideas:
-            current_ideas_str = "\n".join(f"{i+1}. {idea}" for i, idea in enumerate(n_minus_3_ideas))
+        if current_phase in ["discussion", "direct_discussion"] and n_minus_n_ideas:
+            current_ideas_str = "\n".join(f"{i+1}. {idea}" for i, idea in enumerate(n_minus_n_ideas))
             previous_responses.insert(0, f"The initial ideas under discussion before team feedback:\n{current_ideas_str if current_ideas_str else '(none)'}")
 
         return previous_responses
-
 
     def add_chat_entry(self, model_name, agent_name, prompt, response, phase, **kwargs):
         """
@@ -165,7 +167,7 @@ class Conversation:
             }
 
             # Update condition to include open_discussion
-            if phase in ["discussion", "direct_discussion", "open_discussion"] and 'current_ideas' in kwargs:
+            if 'current_ideas' in kwargs:
                 entry['current_ideas'] = list(kwargs['current_ideas'])  # Store a copy of the current_ideas list
             
             if 'round_number' in kwargs:
@@ -179,14 +181,6 @@ class Conversation:
             log_message = f"[{phase}] {agent_name} ({model_name}):"
             log_message += f"\nPrompt: {prompt}"
             log_message += f"\nResponse: {response}"
-            # NEW: Log idea evolution concisely if provided via current_ideas along with round or idea information
-            if 'current_ideas' in kwargs:
-                current_ideas = kwargs.get('current_ideas', [])
-                # Use round_number or idea_index info if provided
-                round_info = kwargs.get('round_number', None) or kwargs.get('idea_index', None)
-                log_message += f"\nIdea Evolution: {current_ideas}"
-                if round_info is not None:
-                    log_message += f" | Info: {round_info}"
             logging.info(log_message)
 
         except Exception as e:
@@ -253,7 +247,9 @@ class Conversation:
             persona_type = self.task_config.get("persona_type", "unknown_persona")
             phases = self.task_config.get("phases", "unknown_phases")
             generation_method = self.task_config.get("generation_method", "unknown_generation")
-
+            discussion_method = self.task_config.get("discussion_method", "unknown_discussion")
+            replacement_pool_size = self.task_config.get("replacement_pool_size", "unknown_replacement_pool_size")
+            replacement_pool_size = str(replacement_pool_size)
             try:
                 model_part = self.sanitize_model_name(model_name) 
             except Exception as e:
@@ -267,7 +263,7 @@ class Conversation:
             elif phases == 'direct_discussion':
                 base_filename = f"{model_part}_{temperature}_{llm_count}_{persona_type}_DiscussionOnly.txt"
             elif phases == 'three_stage':
-                base_filename = f"{model_part}_{temperature}_{llm_count}_{persona_type}_{generation_method}_Think.txt"
+                base_filename = f"{model_part}_{temperature}_{llm_count}_{persona_type}_{generation_method}_{discussion_method}_pool_size_{replacement_pool_size}.txt"
             else:
                 base_filename = "chat_history.txt" 
 

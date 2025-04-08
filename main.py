@@ -9,7 +9,10 @@ from message_strategies import GenericMessageStrategy
 from discussion_modes import GenericDiscussionMode
 import logging
 
-def main(llm_count=1, persona_type=None, phases="three_stage", generation_method="dependent"):
+def main(llm_count=1, persona_type=None, phases="three_stage", generation_method="dependent", 
+         selection_method="rating", discussion_method="all_at_once", 
+         discussion_order_method="fixed", task_type="PS", replacement_pool_size=0, 
+         skip_to_discussion=False):
     try:
         if persona_type == 'none':
             system_messages = [""] * llm_count
@@ -43,20 +46,34 @@ def main(llm_count=1, persona_type=None, phases="three_stage", generation_method
         #     agents.append(agent)
         # print(agents)
 
+        # task_config = {
+        #     "task_type": "PS",               # "AUT" or "PS"
+        #     "phases": phases,          # "three_stage" or "direct_discussion"
+        #     "generation_method": generation_method, # "independent" or "dependent"
+        #     "selection_method": "rating", # "selectionTop" or "rating"
+        #     "discussion_method": "all_at_once",  # "all_at_once" or "one_by_one", "open", or "iterative_refinement", or "creative"
+        #     "discussion_order_method": "fixed",  # "fixed" or "random" or "hand_raising"
+        #     "persona_type":persona_type,
+        #     "llm_count":llm_count,
+        #     "model":DEFAULT_MODEL,
+        #     "temperature":DEFAULT_TEMPERATURE,
+        #     "replacement_pool_size": 0
+        # }
+
         task_config = {
-            "task_type": "PS",               # "AUT" or "PS"
+            "task_type": task_type,               # "AUT" or "PS"
             "phases": phases,          # "three_stage" or "direct_discussion"
             "generation_method": generation_method, # "independent" or "dependent"
-            "selection_method": "rating", # "selectionTop" or "rating"
-            "discussion_method": "iterative_refinement",  # "all_at_once" or "one_by_one", "open", or "iterative_refinement"
-            "discussion_order_method": "fixed",  # "fixed" or "random" or "hand_raising"
-            "persona_type":persona_type,
-            "llm_count":llm_count,
-            "model":DEFAULT_MODEL,
-            "temperature":DEFAULT_TEMPERATURE,
-            "replacement_pool_size": 0
-
+            "selection_method": selection_method, # "selectionTop" or "rating"
+            "discussion_method": discussion_method,  # "all_at_once" or "one_by_one", "open", or "iterative_refinement", or "creative"
+            "discussion_order_method": discussion_order_method,  # "fixed" or "random" or "hand_raising"
+            "persona_type": persona_type,
+            "llm_count": llm_count,
+            "model": DEFAULT_MODEL,
+            "temperature": DEFAULT_TEMPERATURE,
+            "replacement_pool_size": replacement_pool_size
         }
+
         data_strategy = GenericDataStrategy(task_config=task_config)
         message_strategy = GenericMessageStrategy(task_config=task_config, data_strategy=data_strategy)
         conversation = Conversation(agents=agents, data_strategy=data_strategy, task_config=task_config)
