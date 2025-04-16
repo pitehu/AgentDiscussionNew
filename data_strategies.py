@@ -320,9 +320,9 @@ class GenericDataStrategy:
         {replacement_str if replacement_str else "(none)"}
 
         Based on the agent's response, judge whether the agent:
-        - **Agrees** with the current ideas without suggesting any changes. (Agree: No changes needed.)
-        - **Modifies** any of the current ideas. (Respond 'modify: ')
-        - **Replaces** any of the current ideas with one from the replacement pool. (Respond 'replace:')
+        - **Agrees** with the current ideas without suggesting any changes. The agent explicitly says "Agree:..."
+        - **Modifies** any of the current ideas. The agent explicitly says "Modify:..."
+        - **Replaces** any of the current ideas with one from the replacement pool. The agent explicitly says "Replace:..."
 
         For each action, the agent must ensure that the lists reflect the following updates:
 
@@ -336,16 +336,17 @@ class GenericDataStrategy:
 
         3. **Replace**:
             - If the agent replaces an idea:
-                - Update the `current_ideas` list by replacing the specified idea with the selected idea from the `replacement_ideas` list.
-                - Remove the selected replacement idea from the `replacement_ideas` list.
-                - Ensure the updated `replacement_ideas` list does not include the replaced idea.
-                - Discard the replaced idea and move it to the `replaced_ideas` list for record-keeping.
+                - Update the `current_ideas` list by the agent's newply proposed idea, VERBATIM.
+                - Remove the selected replacement idea from the `replacement_ideas` list. Skip if there is no replacement idea.
+                - Move the replaced idea to the `replaced_ideas` list by appending this list.
+        
         **Important**:
-            - The `current_ideas` list must only include **one idea** (the idea being discussed).
+            - The `current_ideas` list must only include **one idea**. If the agent modifies or replaces an idea, ensure that the `current_ideas` list reflects this change.
             - The `replacement_ideas` list must reflect the updated pool after any replacements.
+            - The `replaced_ideas` list must include the replaced idea(s) for record-keeping.
+            - You MUST preserve the VERBATIM original text and formatting of all idea strings in the output. 
 
-
-        The expected output JSON structure should detail the action taken, the updated list of current ideas (only include one idea), and the updated list of replacement ideas:
+        The expected output JSON structure should detail the action taken, the updated list of current ideas (only include one idea), an updated list of replacement ideas and an updated list of replaced ideas, all must in full and not shortened:
         {{
             "action_type": "agree/modify/replace",
             "current_ideas": [],

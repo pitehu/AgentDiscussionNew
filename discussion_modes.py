@@ -1,19 +1,20 @@
 # discussion_modes.py
 
 import random
-from config import get_max_responses
 import logging
 from prompts import TASK_REQUIREMENTS
 import json
 import re
 from collections import defaultdict
+import textwrap
+
 class GenericDiscussionMode:
     def __init__(self, conversation, task_config, message_strategy):
         self.conversation = conversation
         self.task_config = task_config
         self.message_strategy = message_strategy
         self.data_strategy = conversation.data_strategy
-        self.max_responses = get_max_responses(task_config.get("phases","three_stage"))
+        self.max_responses = task_config.get("max_responses")
         logging.info("Discussion mode initialized with task configuration: %s", self.task_config)
 
     # def run(self):
@@ -104,6 +105,7 @@ class GenericDiscussionMode:
         print("\n=== Final Token Usage Summary ===")
         print(self.conversation.get_token_summary())
 
+
     def run_open_discussion(self):
         print("Starting open discussion phase.")
         total_resp = 0
@@ -113,9 +115,10 @@ class GenericDiscussionMode:
             msgs = self.message_strategy.construct_messages(agent, "open_discussion", self.conversation, current_round=total_resp+1, max_rounds=self.max_responses)
             resp, prompt_tokens, completion_tokens, reasoning_tokens = agent.generate_response(msgs)
             # Updated: pass current_ideas and round_number for proper idea evolution logging.
-            self.conversation.add_chat_entry(agent.model_name, agent.name, "\n".join(m["content"] for m in msgs), resp, "open_discussion", round_number=total_resp+1)
             self.conversation.update_phase_token_usage("discussion", prompt_tokens, completion_tokens, reasoning_tokens)
             self.data_strategy.update_shared_data(self.conversation, resp)
+            self.conversation.add_chat_entry(agent.model_name, agent.name, "\n".join(m["content"] for m in msgs), resp, "open_discussion", current_ideas = self.data_strategy.current_ideas, round_number=total_resp+1)
+
             print(f"[open_discussion] {agent.name} => {resp}")
             total_resp += 1
         print("Open discussion phase ended.")
@@ -127,42 +130,44 @@ class GenericDiscussionMode:
         task_context = TASK_REQUIREMENTS['AUT_Mode1_Overall'] if task_type == "AUT" else TASK_REQUIREMENTS['PS_Overall']
 
         model = summarizing_agent.model_name
-        role = "user" if model in ['o3-mini','o1','o1-mini',"deepseek-ai/DeepSeek-R1","gemini-2.0-flash-thinking-exp"] else "system"
+        role = "user" if model in self.task_config.get("role_assignment_in_user_prompt", [None]) else "system"
 
+        summary_msgs =[]
+        summary_msgs.append({"role": role, "content": f"# **Role**\n{agent.system_message}"})
+
+        if self.task_config.get("task_type","AUT")=="AUT":
+            summary_msgs.append({"role":role,"content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['AUT_Mode1_Overall'].strip()}"})
+        else:
+            summary_msgs.append({"role":role,"content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['PS_Overall'].strip()}"})
         # Create a summary request message
-        summary_msgs = [
-            {
-                "role": role,
-                "content": (
-                    f"You have participated in a collaborative discussion based on this task: \n{task_context}\n"
-                    "Your goal now is to synthesize the key elements and insights from the entire discussion "
-                    "into a single, compelling, and well-defined final idea. Present this as a unified concept, "
-                    "as if you are proposing the final outcome of the collaboration."
-                )
-            },
+        summary_msgs.append(
             {
                 "role": "user",
-                "content": (
-                    "Based on the entire discussion that just took place, formulate the definitive final idea. "
-                    "Present it clearly and concisely as a single concept. Start your response *exactly* with 'FINAL IDEA:' "
-                    "The description of the idea itself should be approximately 80-100 words.\n"
-                )
-            }
-        ]
-        history = conversation.get_previous_responses(current_phase="open_discussion",history_depth=None)
+                "content": "Your goal now is to summarize and synthesize the entire discussion "
+                        "into a single, compelling, and well-defined final idea. Present this as a unified concept, "
+                        "as if you are proposing the final idea in response to the task.\n"
+                        "Start your response *exactly* with 'FINAL IDEA:'.\n"
+                        "The idea should be approximately 80-100 words."
+            })
+        history = self.conversation.get_previous_responses(current_phase="open_discussion",history_depth=-1)
+
         history_text = "\n".join(history) if history else "(Start of the open discussion phase)"
+
+        num_responses = self.task_config.get("llm_count", "3") # Get the number of responses from the task config
         history_section = (
-            f"**Discussion So Far:**\n"
+            f"\n# **Discussion History (in chronological order)**\n" # <-- Changed here
             f"{history_text}\n"
             # Separator moved here, before the optional warning/final prompt
             "---\n"
         )
+
         summary_msgs.append({
             "role": 'user',
             "content": history_section
         })
 
         # Generate the summary
+        print("Generating summary...")
         final_idea, pt, ct, rt = summarizing_agent.generate_response(summary_msgs)
         
 
@@ -250,7 +255,7 @@ class GenericDiscussionMode:
             ranking_msgs = []
             # Use agent.model_name to set the role properly.
             model = agent.model_name
-            role = "user" if model in ['o3-mini','o1','o1-mini',"deepseek-ai/DeepSeek-R1","gemini-2.0-flash-thinking-exp"] else "system"
+            role = "user" if model in self.task_config.get("role_assignment_in_user_prompt", [None]) else "system"
             
             # Get task type and add system prompt
             task_type = self.task_config.get("task_type", "AUT")
@@ -267,20 +272,32 @@ class GenericDiscussionMode:
             # Create text with randomized order
             ideas_text = "\n".join([f"Idea {i+1}: {idea}" for i, idea in enumerate(shuffled_ideas)])
 
-            ranking_prompt = f"""# **Idea Ranking Task**
-    As an expert creative idea evaluator, please output the BEST idea based on the following criteria:
-    1. Novelty
-    2. Usefulness
 
-    Ideas to rank:
-    {ideas_text}
-    Provide only the best idea, verbatim.
-            """
+            role = "user" if model in self.task_config.get("role_assignment_in_user_prompt", [None]) else "system"
+
+            ranking_msgs =[]
+            ranking_msgs.append({"role": role, "content": f"# **Role**\n{agent.system_message}"})
+
+            if self.task_config.get("task_type","AUT")=="AUT":
+                ranking_msgs.append({"role":role,"content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['AUT_Mode1_Overall'].strip()}"})
+            else:
+                ranking_msgs.append({"role":role,"content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['PS_Overall'].strip()}"})
+
+            ranking_prompt = ("We define creativity as a combination of novelty (how original or unexpected the idea is in this context) and usefulness (its potential practical value or impact in addressing the goal)."
+            "Please output the BEST idea based on creativity.\n"
+            "Ideas to rank:\n"
+            f"{ideas_text}\n"
+            "Provide only the best idea, verbatim.")
+
+
+
+
+            ranking_prompt = textwrap.dedent(ranking_prompt).strip()
 
             # Instead of overwriting, combine system_prompt with ranking_prompt in two messages.
             ranking_msgs = [
                 {"role": role, "content": system_prompt},
-                {"role": role, "content": ranking_prompt}
+                {"role": 'user', "content": ranking_prompt}
             ]
             
             best_idea, r_prompt_tokens, r_completion_tokens, r_reasoning_tokens = agent.generate_response(ranking_msgs)
@@ -331,7 +348,7 @@ class GenericDiscussionMode:
                 agent.model_name,
                 agent.name,
                 "", 
-                f"Replaced:{replacement_made}. Final idea for (Round {total_resp+1}): {self.data_strategy.current_ideas[0]}", 
+                f"Replaced: {replacement_made}. Final idea for (Round {total_resp+1}): {self.data_strategy.current_ideas[0]}", 
                 "discussion",
                 current_ideas = self.data_strategy.current_ideas,
                 round_number=total_resp+1
@@ -365,6 +382,13 @@ class GenericDiscussionMode:
             
             # Parse the response to extract 5 ideas
             ideas = [idea.strip() for idea in resp.split('\n') if idea.strip()]
+
+            pattern = r"^\d+\.\s+"
+
+            # 3. Use re.sub() in a list comprehension to remove the pattern
+            ideas = [re.sub(pattern, "", idea) for idea in ideas]
+
+
             novel_ideas.extend([(idea, agent.name) for idea in ideas[:5]])
             
             # use ranked idea as current idea store
@@ -517,11 +541,14 @@ class GenericDiscussionMode:
         if self.task_config.get("discussion_order_method")=="random":
             random.shuffle(agents)
 
+        shuffled_ideas_for_presentation = self.data_strategy.all_ideas[:] # Make a copy
+        random.shuffle(shuffled_ideas_for_presentation)
+
         for ag in agents:
             self.conversation.current_agent= ag
             msgs= self.message_strategy.construct_messages(ag, 'selection', self.conversation)
 
-            lines=[f"Idea {i+1}: {x['idea']}" for i,x in enumerate(self.data_strategy.all_ideas)]
+            lines=[f"Idea {i+1}: {x['idea']}" for i,x in enumerate(shuffled_ideas_for_presentation)]
             msgs.append({"role":"assistant","content":"\n".join(lines)})
 
             # Generate response and get token usage
@@ -549,13 +576,15 @@ class GenericDiscussionMode:
         agents = self.conversation.agents[:]
         if self.task_config.get("discussion_order_method") == "random":
             random.shuffle(agents)
+        shuffled_ideas_for_presentation = self.data_strategy.all_ideas[:] # Make a copy
+        random.shuffle(shuffled_ideas_for_presentation)
 
         for ag in agents:
             self.conversation.current_agent = ag
             # Use selection_novelty instead of regular selection prompt
             msgs = self.message_strategy.construct_messages(ag, 'selection_novelty', self.conversation)
             
-            lines = [f"Idea {i+1}: {x['idea']}" for i,x in enumerate(self.data_strategy.all_ideas)]
+            lines = [f"Idea {i+1}: {x['idea']}" for i,x in enumerate(shuffled_ideas_for_presentation)]
             msgs.append({"role": "assistant", "content": "\n".join(lines)})
 
             resp, prompt_tokens, completion_tokens, reasoning_tokens = ag.generate_response(msgs)
@@ -608,6 +637,17 @@ class GenericDiscussionMode:
         sel_method = self.task_config.get("selection_method", "rating")
         ttype = self.task_config.get("task_type", "AUT")
         initial_setup_done = False
+
+
+        self.conversation.add_chat_entry(
+                    'initial idea',
+                    'initial idea',
+                    '',
+                    '',
+                    'discussion',
+                    current_ideas=self.data_strategy.ranked_ideas[:1], # Log current state
+                    round_number=0
+                )
 
         total_resp = 0
         while total_resp < self.max_responses:
@@ -703,6 +743,8 @@ class GenericDiscussionMode:
             generation_pt, generation_ct, generation_rt = 0, 0, 0 # Tokens for the *chosen* speaker's generation
 
             if disc_order == "hand_raising":
+                self.data_strategy.reset_agreements()
+
                 # --- New Hand-Raising Logic ---
                 print(f"\n--- Round {total_resp + 1}: Hand-Raising Protocol ---")
                 # Step 1: Generate Potential Responses
@@ -725,30 +767,53 @@ class GenericDiscussionMode:
                 intention_scores = {}
                 print("  Generating Intention Scores...")
                 total_intention_pt, total_intention_ct, total_intention_rt = 0, 0, 0
+                agree_count = 0
+                for agent in remain:
+                    agent_potential_response = potential_responses[agent.name]["response"]
+                    expected_agree_phrase = "agree: no changes needed."
+
+                    response_processed = agent_potential_response.strip().lower()
+                    expected_processed = expected_agree_phrase.strip().lower()
+                    if response_processed.find(expected_processed) != -1: # <--- MODIFIED LINE using find()
+                        print(f"Agreement phrase '{expected_agree_phrase}' found!")
+                        agree_count += 1
+                    else:
+                        print(f"Agreement phrase '{expected_agree_phrase}' not found.")
+                if agree_count == len(remain):
+                    print(f"All agents agreed (all_at_once, order: {disc_order}).")
+                    self._print_final()
+                    return
+
+
+
                 for agent in remain:
                     self.conversation.current_agent = agent # Context for message generation
                     agent_potential_response = potential_responses[agent.name]["response"]
-                    history = self.conversation.get_previous_responses(current_phase="discussion", history_depth=10) # Adjust depth as needed
-                    history_text = "\n".join(history) if history else "(Start of Discussion)"
+                    #history = self.conversation.get_previous_responses(current_phase="discussion", history_depth=-1) # Adjust depth as needed
+                    #history_text = "\n".join(history) if history else "(Start of Discussion)"
                     # Define the intention prompt (consider moving to prompts.py)
                     # Define the intention prompt (Focused on CREATIVITY)
-                    intention_prompt = (
-                        f"**Overall Goal:** Generate the MOST CREATIVE idea.\n\n"
-                        f"**Discussion Context:**\n{history_text}\n\n"
-                        f"**Your Potential Contribution:**\n{agent_potential_response}\n\n"
-                        f"---\n"
-                        f"**Task:** CRITICALLY evaluate the magnitude of the CREATIVE LEAP your contribution offers *at this specific moment*. Is it truly pushing the boundaries with significant novelty/synthesis, or is it primarily a refinement, logical extension, or safe addition?\n\n"
-                        f"Rate the IMMEDIATE CREATIVE JUMP on a scale of 0 to 10:\n"
-                        f"*   **0-2 (Minimal/None):** Simple agreement, minor clarification, feasibility focus, repeats prior creative concepts, adds no significant novelty.\n"
-                        f"*   **3-5 (Incremental Improvement):** Builds logically on the last idea, offers a slight variation, combines existing elements predictably, asks a useful but standard question. *This is NOT a high-impact creative move.*\n"
-                        f"*   **6-7 (Noticeable Novelty):** Introduces a distinct new element or perspective, offers a non-obvious connection/twist, suggests a moderately unexpected direction.\n"
-                        f"*   **8-9 (Significant Creative Leap):** Presents a genuinely novel core concept/mechanism, offers a surprising and insightful synthesis, significantly reframes the idea, opens *multiple* new creative avenues.\n"
-                        f"*   **10 (Transformative Breakthrough):** A true paradigm shift for the discussion. Radically challenges assumptions or redefines the problem/solution space in a highly original and promising way. *Reserve ONLY for revolutionary contributions.*\n\n"
-                        f"Be HONEST and STRICT in your self-assessment. High scores (8+) require substantial, demonstrable creative advancement *now*, not just potential. Respond ONLY with the numerical score (e.g., '6')."
-                    )
+
+                    intention_prompt = TASK_REQUIREMENTS["Intention_Scoring"]
+                    #intention_prompt = intention_prompt.replace("{history_text}", history_text)
+                    intention_prompt = intention_prompt.replace("{current_idea}", "\n".join(self.data_strategy.current_ideas))
+                    intention_prompt = intention_prompt.replace("{agent_potential_response}", agent_potential_response)
                     model = agent.model_name
-                    role = "user" if model in ['o3-mini', 'o1', 'o1-mini', "deepseek-ai/DeepSeek-R1", "gemini-2.0-flash-thinking-exp"] else "system" # Adjust as needed
-                    intention_msgs = [{"role": role, "content": intention_prompt}]
+                    role = (
+                        # "developer" if model in ['o3-mini','o1'] else
+                        "user" if model in self.task_config.get("role_assignment_in_user_prompt", [None]) else
+                        "system"
+                    )
+                    intention_msgs =[]
+                    intention_msgs.append({"role": role, "content": f"# **Role**\n{agent.system_message}"})
+
+                    if self.task_config.get("task_type","AUT")=="AUT":
+                        msgs.append({"role":role,"content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['AUT_Mode1_Overall'].strip()}"})
+                    else:
+                        msgs.append({"role":role,"content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['PS_Overall'].strip()}"})
+
+
+                    intention_msgs.append({"role": 'user', "content": intention_prompt})
 
                     score_resp, ipt, ict, irt = agent.generate_response(intention_msgs)
 
@@ -854,6 +919,14 @@ class GenericDiscussionMode:
             # --- Commit Stage (Common for both branches) ---
             if selected_agent and selected_response is not None:
                 # Add the *selected* agent's generation response to history
+                # Update token usage for the *selected* agent's *generation* call
+                self.conversation.update_phase_token_usage("discussion", generation_pt, generation_ct, generation_rt)
+
+                print(f"[{disc_order}] {selected_agent.name} => {selected_response}")
+
+                # Update shared data using the *selected* response
+                self.data_strategy.update_shared_data(self.conversation, selected_response)
+
                 self.conversation.add_chat_entry(
                     selected_agent.model_name,
                     selected_agent.name,
@@ -863,15 +936,6 @@ class GenericDiscussionMode:
                     current_ideas=self.data_strategy.current_ideas, # Log current state
                     round_number=total_resp + 1
                 )
-
-                # Update token usage for the *selected* agent's *generation* call
-                self.conversation.update_phase_token_usage("discussion", generation_pt, generation_ct, generation_rt)
-
-                print(f"[{disc_order}] {selected_agent.name} => {selected_response}")
-
-                # Update shared data using the *selected* response
-                self.data_strategy.update_shared_data(self.conversation, selected_response)
-
                 total_resp += 1
 
                 # Check agreement *after* the selected agent has spoken and state updated
@@ -888,6 +952,7 @@ class GenericDiscussionMode:
         # Loop finished (max responses reached)
         print(f"Max responses ({self.max_responses}) reached (all_at_once, order: {disc_order}) => no full agreement or discussion limit hit.")
         self._print_final()
+
 
     def discussion_one_by_one(self):
         """
@@ -1042,7 +1107,7 @@ class GenericDiscussionMode:
 
                 # Let chosen agent speak
                 self.conversation.current_agent= chosen
-                msgs= self.message_strategy.construct_messages(chosen,'discussion', self.conversation, r,current_round=local_res + 1, max_rounds=10)
+                msgs= self.message_strategy.construct_messages(chosen,'discussion', self.conversation, r,current_round=local_res + 1, max_rounds=self.max_responses)
                 resp, prompt_tokens, completion_tokens, reasoning_tokens= chosen.generate_response(msgs)
                 self.conversation.add_chat_entry(chosen.model_name, chosen.name, "\n".join(m['content'] for m in msgs), resp, 'discussion', r,current_ideas=self.data_strategy.current_ideas)
 

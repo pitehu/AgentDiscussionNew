@@ -4,7 +4,7 @@ import re
 import logging  # <-- Added for logging
 from prompts import TASK_REQUIREMENTS
 from utils import calculate_tokens
-
+import textwrap
 class GenericMessageStrategy:
     def __init__(self, task_config, data_strategy):
         self.task_config = task_config
@@ -17,7 +17,7 @@ class GenericMessageStrategy:
         model = agent.model_name  # Fetch the correct model for each agent
         role = (
             # "developer" if model in ['o3-mini','o1'] else
-            "user" if model in ['o3-mini','o1','o1-mini',"deepseek-ai/DeepSeek-R1","gemini-2.0-flash-thinking-exp"] else
+            "user" if model in self.task_config.get("role_assignment_in_user_prompt", [None]) else
             "system"
         )
 
@@ -153,7 +153,7 @@ class GenericMessageStrategy:
         print(model)
         role = (
             # "developer" if model in ['o3-mini','o1'] else
-            "user" if model in ['o3-mini','o1','o1-mini',"deepseek-ai/DeepSeek-R1","gemini-2.0-flash-thinking-exp"] else
+            "user" if model in self.task_config.get("role_assignment_in_user_prompt", [None]) else
             "system"
         )
 
@@ -196,14 +196,52 @@ class GenericMessageStrategy:
             if "{{total_resp}}" in prompt:
                 prompt = prompt.replace("{{total_resp}}", str((total_resp or 0) + 1))
             if "{{max_rounds}}" in prompt:
-                prompt = prompt.replace("{{max_rounds}}", str(self.task_config.get("max_rounds", 20)))
+                prompt = prompt.replace("{{max_rounds}}", str(self.task_config.get("max_responses", 20)))
 
         # Display task-specific prompt first
         
+        previous_responses_list = conversation.get_previous_responses(
+            idea_index=(idea_index if disc_method == "one_by_one" else None),
+            current_phase="discussion", # Or relevant phase like "discussion", "open_discussion"
+        )
+
+        # Construct message content
         msgs.append({"role": role, "content": f"\n# **Current Task**\n{prompt.strip()}"})
 
-        # Insert previous responses before current and replacement ideas
-        msgs.append({"role": "user", "content": "\n# **Discussion History**\nBelow is the discussion history for the past three rounds. Other team members' feedback on these ideas so far (last 3 responses, in chronological order):\n" + history_str +"\n"})
+        # --- Build the Discussion History Section ---
+        history_section_content = ["\n# **Discussion History**"] # Start with the header
+
+        initial_ideas_str = None
+        feedback_list = []
+
+        if previous_responses_list:
+            # Check if the first element is the "initial ideas" block added by get_previous_responses
+            # This block is only added for "discussion" and "direct_discussion" phases
+            if previous_responses_list[0].startswith("The initial ideas under discussion"):
+                initial_ideas_str = previous_responses_list[0]
+                feedback_list = previous_responses_list[1:] # The rest are feedback/responses
+
+            # Add the initial ideas block if it exists
+            if initial_ideas_str:
+                history_section_content.append(f"{initial_ideas_str}") # Add newline for spacing
+
+            # Add the specific introductory sentence and the feedback/responses *only if* there is feedback
+            if feedback_list:
+                # Use the exact original wording requested
+                num_responses = self.task_config.get("llm_count", "3") # Get the number of responses from the task config
+                intro_sentence = f"Team members' feedback on these ideas so far (last {num_responses} responses, in chronological order):"
+                history_section_content.append(f"\n{intro_sentence}") # Add newline for spacing before the intro
+                history_section_content.append("\n".join(feedback_list)) # Append the actual feedback items
+            elif not initial_ideas_str: # No initial ideas were prepended AND no feedback responses exist
+                 history_section_content.append("\nNo previous discussion contributions found for this context.")
+            # else: If there were initial ideas but no feedback, we just show the initial ideas.
+
+        else:
+            # No history at all was returned by get_previous_responses
+            history_section_content.append("\nNo previous discussion history available.")
+
+        # Join the parts of the history section and add it as one message
+        msgs.append({"role": "user", "content": "\n".join(history_section_content)})
 
         current_ideas_str = "\n".join(f"{i+1}. {txt}" for i, txt in enumerate(self.data_strategy.current_ideas))
         replacement_ideas_str = self.get_replacement_ideas_str(agent, sel_method)
@@ -216,12 +254,12 @@ class GenericMessageStrategy:
 
         # Append structured message with Markdown formatting
         msgs.append({"role": "user", "content": 
-            "# **Current, Replacement, and Replaced Ideas**\n"
+            "\n# **Current, Replacement, and Replaced Ideas**\n"
             "**Current Ideas Under Discussion:**\n"
             f"{current_ideas_str if current_ideas_str else '(None)'}\n\n"
             
-            "**Replacement Ideas Pool (yours):**\n"
-            f"{replacement_ideas_str if replacement_ideas_str else '(None)'}"
+            "**Replacement Ideas Pool:**\n"
+            f"{replacement_ideas_str if replacement_ideas_str else '(None)'}\n"
             f"{replaced_ideas_section}" 
         })
 
@@ -246,7 +284,7 @@ class GenericMessageStrategy:
         model = agent.model_name  # Fetch the correct model for each agent
         role = (
             # "developer" if model in ['o3-mini','o1'] else
-            "user" if model in ['o3-mini','o1','o1-mini',"deepseek-ai/DeepSeek-R1","gemini-2.0-flash-thinking-exp"] else
+            "user" if model in self.task_config.get("role_assignment_in_user_prompt", [None]) else
             "system"
         )
 
@@ -275,24 +313,64 @@ class GenericMessageStrategy:
             else:  # PS
                 prompt = TASK_REQUIREMENTS["PS_Direct_Discussion_AllAtOnce"]
                 prompt = prompt.replace("{{total_resp}}", str(total_resp + 1))
-                prompt = prompt.replace("{{max_rounds}}", str(self.task_config.get("max_rounds", 20)))
+                prompt = prompt.replace("{{max_rounds}}", str(self.task_config.get("max_responses", 20)))
 
 
         # Fetch previous responses
         disc_method = self.task_config.get("discussion_method", "all_at_once")
-        previous_responses = conversation.get_previous_responses(idea_index if disc_method == "one_by_one" else None,current_phase="direct_discussion")
-        history_str = "\n".join(previous_responses) if previous_responses else "No previous responses."
+        previous_responses_list = conversation.get_previous_responses(
+            idea_index=(idea_index if disc_method == "one_by_one" else None),
+            current_phase="direct_discussion" # Or relevant phase like "discussion", "open_discussion"
+        )
 
         # Construct message content
         msgs.append({"role": role, "content": f"\n# **Current Task**\n{prompt.strip()}"})
-        msgs.append({"role": "user", "content": f"\n# **Discussion History**\nBelow is the discussion history for the past three rounds. Other team members' feedback on these ideas so far (last 3 responses, in chronological order): \n\n{history_str}"})
 
-        # Add current and replacement ideas
+        # --- Build the Discussion History Section ---
+        history_section_content = ["\n# **Discussion History**"] # Start with the header
+
+        initial_ideas_str = None
+        feedback_list = []
+
+        if previous_responses_list:
+            # Check if the first element is the "initial ideas" block added by get_previous_responses
+            # This block is only added for "discussion" and "direct_discussion" phases
+            if previous_responses_list[0].startswith("The initial ideas under discussion"):
+                initial_ideas_str = previous_responses_list[0]
+                feedback_list = previous_responses_list[1:] # The rest are feedback/responses
+
+            # Add the initial ideas block if it exists
+            if initial_ideas_str:
+                history_section_content.append(f"{initial_ideas_str}") # Add newline for spacing
+
+            # Add the specific introductory sentence and the feedback/responses *only if* there is feedback
+            if feedback_list:
+                # Use the exact original wording requested
+                num_responses = self.task_config.get("llm_count", "3") # Get the number of responses from the task config
+                intro_sentence = f"Team members' feedback on these ideas so far (last {num_responses} responses, in chronological order):"
+                history_section_content.append(f"\n{intro_sentence}") # Add newline for spacing before the intro
+                history_section_content.append("\n".join(feedback_list)) # Append the actual feedback items
+            elif not initial_ideas_str: # No initial ideas were prepended AND no feedback responses exist
+                 history_section_content.append("\nNo previous discussion contributions found for this context.")
+            # else: If there were initial ideas but no feedback, we just show the initial ideas.
+
+        else:
+            # No history at all was returned by get_previous_responses
+            history_section_content.append("\nNo previous discussion history available.")
+
+        # Join the parts of the history section and add it as one message
+        msgs.append({"role": "user", "content": "\n".join(history_section_content)})
+
+
+        # --- Add Current Ideas Section (Conditional) ---
+        # Original logic for adding current ideas remains the same
         if total_resp == 0 or (disc_method == 'one_by_one' and current_round == 1):
-            pass
+             pass # No current ideas to show yet in these cases
         else:
             current_ideas_str = "\n".join(f"{i + 1}. {txt}" for i, txt in enumerate(self.data_strategy.current_ideas))
-            msgs.append({"role": "user", "content": f"\n# **Current Ideas Under Discussion:**\n{current_ideas_str if current_ideas_str else '(none)'}"})
+            # Add extra newline before for better separation from history
+            msgs.append({"role": "user", "content": f"\n**Current Ideas Under Discussion:**\n{current_ideas_str if current_ideas_str else '(none)'}"})
+
 
     def _add_open_discussion_instructions(self, msgs, agent, conversation, current_round=None, total_rounds=None):
         round_info = ""
@@ -381,9 +459,9 @@ class GenericMessageStrategy:
                 is_final_rounds = True
                 # Simple, purely informational warning - no convergence instructions
                 final_rounds_warning = (
-                    f"\n---\n"
+                    "---\n"
                     f"**Note:** Nearing end of discussion ({rounds_remaining} round(s) remaining including this one).\n"
-                    f"---\n"
+                    "---\n"
                 )
 
         # --- History Section (Core Context) ---
@@ -391,12 +469,11 @@ class GenericMessageStrategy:
         history = conversation.get_previous_responses(current_phase="open_discussion")
         # Use a slightly more descriptive placeholder if empty
         history_text = "\n".join(history) if history else "(Start of the open discussion phase)"
-        history_section = (
-            f"**Discussion So Far:**\n"
-            f"{history_text}\n"
-            # Separator moved here, before the optional warning/final prompt
-            "---\n"
-        )
+        history_section = textwrap.dedent(f"""\
+            **Discussion So Far:**
+            {history_text}
+            ---
+        """).strip() # Added dedent and strip
 
         # --- Final Instruction Prompt (Minimalist) ---
         # Identify the agent and ask for their response directly
@@ -432,18 +509,20 @@ class GenericMessageStrategy:
         """
         # Get the model and role
         model = agent.model_name
-        role = "user" if model in ['o3-mini','o1','o1-mini',"deepseek-ai/DeepSeek-R1","gemini-2.0-flash-thinking-exp"] else "system"
+        role = "user" if model in self.task_config.get("role_assignment_in_user_prompt", [None]) else "system"
         
         # Get task type
         task_type = self.task_config.get("task_type", "AUT")
         
         # 1. Add the main instructions
-        instruction = """
-Your goal is to generate ONE significantly more creative idea that has to be different from current ideas. 
-**Important:** 
-- Focus on quality over quantity - create ONE excellent idea rather than multiple ideas
-- Respond with just the idea itself - no additional text or explanations.
-"""
+        instruction = textwrap.dedent("""\
+            Your goal is to generate ONE significantly more creative idea that has to be different from current ideas.
+            **Important:**
+            - Focus on quality over quantity - create ONE excellent idea rather than multiple ideas
+            - Respond with just the idea itself - no additional text or explanations.
+            """).strip() # Added dedent and strip
+
+
         msgs.append({"role": role, "content": instruction})
         
         """
@@ -469,18 +548,27 @@ Your goal is to generate ONE significantly more creative idea that has to be dif
         # Get any creative generation history
         # Get ranked ideas
         ranked_ideas = self.data_strategy.ranked_ideas
+
+
         if ranked_ideas:
-            ideas_str = "\n".join(f"{i+1}. {idea}" for i, idea in enumerate(ranked_ideas))
+            ranked_ideas_str = "\n".join(f"{i+1}. {idea}" for i, idea in enumerate(ranked_ideas))
         else:
-            ideas_str = "No ranked ideas available."
-            
+            ranked_ideas_str = "No ranked ideas available."
+        new_ideas_str = '(None)'
+        if len(ranked_ideas) > 15:
+            new_ideas = ranked_ideas[15:]
+            new_ideas_str = "\n".join(f"{i+1}. {idea}" for i, idea in enumerate(new_ideas))
+            ranked_ideas = ranked_ideas[:15]  # Limit to 15 ideas for the prompt
+            ranked_ideas_str = "\n".join(f"{i+1}. {idea}" for i, idea in enumerate(ranked_ideas))
+        
+
         # Get the creative prompt from TASK_REQUIREMENTS
         creative_prompt = TASK_REQUIREMENTS.get("Creative_Idea_Generation", "Please propose creative ideas.").strip()
-        
         # Combine creative prompt, history and ranked ideas
         full_prompt = (
-            f"{creative_prompt}\n\n"
-            f"Existing Ideas:\n{ideas_str}"
+            f"{creative_prompt}"
+            f"\n\nPreviously ranked ideas by the team:\n{ranked_ideas_str}"
+            f"\n\nNew ideas generated by the team:\n{new_ideas_str}"
         )
         msgs.append({"role": "user", "content": full_prompt})
     

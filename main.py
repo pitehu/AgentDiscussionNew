@@ -2,27 +2,26 @@
 
 from roles import ROLES
 from agent import Agent
-from config import DEFAULT_MODEL, DEFAULT_TEMPERATURE,get_max_responses
+from config import DEFAULT_MODEL, DEFAULT_TEMPERATURE
 from conversation import Conversation
 from data_strategies import GenericDataStrategy
 from message_strategies import GenericMessageStrategy
 from discussion_modes import GenericDiscussionMode
 import logging
 
-def main(llm_count=1, persona_type=None, phases="three_stage", generation_method="dependent", 
+def main(llm_count=1, model = 'gpt-4o', temperature=1, persona_type=None, phases="three_stage", generation_method="dependent", 
          selection_method="rating", discussion_method="all_at_once", 
          discussion_order_method="fixed", task_type="PS", replacement_pool_size=0, 
-         skip_to_discussion=False):
+         skip_to_discussion=False, max_responses=30):
     try:
         if persona_type == 'none':
             system_messages = [""] * llm_count
         elif persona_type == 'same':
-            system_messages = [ROLES["Same_Persona"]] * llm_count
+            system_messages = [f"You are Agent {i+1}. {ROLES['Same_Persona']}" for i in range(llm_count)]
         elif persona_type == 'different':
-            personas = ["Persona_1", "Persona_2", "Persona_3"]
+            personas = [f"Persona_{i+1}" for i in range(llm_count)]
             system_messages = [ROLES[persona] for persona in personas[:llm_count]]
        
-
         # Handle single or multiple models
         if isinstance(DEFAULT_MODEL, list):
             if len(DEFAULT_MODEL) < llm_count:
@@ -34,7 +33,7 @@ def main(llm_count=1, persona_type=None, phases="three_stage", generation_method
         # Create agents with assigned models
         agents = []
         for i, (system_message, model_name) in enumerate(zip(system_messages, agent_models)):
-            agent = Agent(name=f"Agent_{i+1}", system_message=system_message, model_name=model_name)
+            agent = Agent(name=f"Agent {i+1}", system_message=system_message, model_name=model_name)
             agents.append(agent)
         
         print(agents)
@@ -69,9 +68,11 @@ def main(llm_count=1, persona_type=None, phases="three_stage", generation_method
             "discussion_order_method": discussion_order_method,  # "fixed" or "random" or "hand_raising"
             "persona_type": persona_type,
             "llm_count": llm_count,
-            "model": DEFAULT_MODEL,
-            "temperature": DEFAULT_TEMPERATURE,
-            "replacement_pool_size": replacement_pool_size
+            "model": model,
+            "temperature": temperature,
+            "replacement_pool_size": replacement_pool_size,
+            "role_assignment_in_user_prompt": ["deepseek-ai/DeepSeek-R1"],
+            "max_responses": max_responses,
         }
 
         data_strategy = GenericDataStrategy(task_config=task_config)

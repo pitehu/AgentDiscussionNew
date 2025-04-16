@@ -99,28 +99,45 @@ class Conversation:
             )
         return summary
 
-    def get_previous_responses(self, idea_index=None, current_phase=None, history_depth=3):
+    def get_previous_responses(self, idea_index=None, current_phase=None, history_depth=None):
         previous_responses = []
         n_minus_n_ideas = None
 
         # Include entries that match the given current_phase, including "open_discussion".
         filtered_history = [entry for entry in self.chat_history if not current_phase or entry["phase"] == current_phase]
+        filtered_history = [entry for entry in filtered_history if entry["agent"] != 'initial idea']
+
         chat_length = len(filtered_history)
         llm_count = self.task_config.get("llm_count", "none")
+        if history_depth is None:
+        # Step 2 & 3: If not provided, use len(self.agent) as the default
+            history_depth = len(self.agents)
 
         # Update condition to include open_discussion.
         if current_phase in ["discussion", "direct_discussion", "open_discussion"]:
             # Extract ideas with different conditions for discussion/direct_discussion/open_discussion
-            if history_depth is None:
+            if history_depth==-1:
                 target_index = 0  # Get from the very beginning
 
-            if current_phase == "direct_discussion":
-                target_index = 0 if chat_length < (history_depth + 2) else chat_length - history_depth
-            elif current_phase in ["discussion", "open_discussion"]:
-                target_index = 0 if chat_length < (history_depth + 1) else chat_length - history_depth
-            if 0 <= target_index < chat_length:
-                n_minus_n_ideas = filtered_history[target_index].get("current_ideas", [])
+            else: 
+                # Only perform calculations if history_depth is an integer
+                if not isinstance(history_depth, int) or history_depth < 0:
+                     # Handle invalid integer history_depth, maybe default or raise error
+                     print(f"Warning: Invalid history_depth '{history_depth}', defaulting to 0.")
+                     target_index = 0 # Or consider setting to chat_length to get no initial ideas?
+                elif current_phase == "direct_discussion":
+                    # Use max to ensure index isn't negative
+                    target_index = max(0, chat_length - history_depth) # Simpler logic
+                elif current_phase in ["discussion", "open_discussion"]:
+                     # Use max to ensure index isn't negative
+                    target_index = max(0, chat_length - history_depth) # Simpler logic
 
+            # Now target_index is calculated safely before this check
+            if 0 <= target_index < chat_length:
+                 # Check if the entry actually exists and has 'current_ideas'
+                 entry_at_target = filtered_history[target_index]
+                 if entry_at_target:
+                     n_minus_n_ideas = entry_at_target.get("current_ideas", []) # Use .get for safety
         if current_phase == "direct_discussion":
             history_to_use = filtered_history[1:] if chat_length > 1 else []
         else:
@@ -141,8 +158,9 @@ class Conversation:
 
             # Use number of agents instead of hardcoded 3
             agent_count = len(self.agents)
-            if len(previous_responses) == agent_count and not (current_phase == "idea_generation" and llm_count == 6):
-                break
+            if history_depth != -1:
+                if len(previous_responses) == agent_count and not (current_phase == "idea_generation" and llm_count == 6):
+                     break
 
         previous_responses = list(reversed(previous_responses))  # Reverse to maintain chronological order
 
@@ -374,6 +392,7 @@ class Conversation:
                             file.write("Current Ideas:\n")
                             for i, idea in enumerate(entry['ideas'], 1):
                                 file.write(f"{i}. {idea}\n")
+                            file.write(f"\n")
                             file.write(f"Response: {entry['response']}\n")
                             file.write("-" * 40 + "\n")
                 else:
