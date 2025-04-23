@@ -447,7 +447,7 @@ class GenericMessageStrategy:
         is_final_rounds = False
         final_round_threshold = 5 # Notify within the last 5 rounds
         instruction_header = (
-            "In terms of formatting, you should not use lists or bullet points unless absolutely necessary.\n"
+            "In terms of formatting, you should not use lists or bullet points unless absolutely necessary.\n\n"
             )
 
 
@@ -468,12 +468,8 @@ class GenericMessageStrategy:
         # Present history clearly FIRST - setting the immediate context
         history = conversation.get_previous_responses(current_phase="open_discussion")
         # Use a slightly more descriptive placeholder if empty
-        history_text = "\n".join(history) if history else "(Start of the open discussion phase)"
-        history_section = textwrap.dedent(f"""\
-            **Discussion So Far:**
-            {history_text}
-            ---
-        """).strip() # Added dedent and strip
+        history_text = "\n".join(history).strip() if history else "(Start of the open discussion phase)"
+        history_section = f"# **Discussion History**\n{history_text}\n---"
 
         # --- Final Instruction Prompt (Minimalist) ---
         # Identify the agent and ask for their response directly

@@ -177,7 +177,7 @@ PS_DISCUSSION_RATING = """
   - **Agree:** If the current idea is extremely creative and you cannot come up with a more creative idea, reply "Agree: No changes needed."
   - **Modify:** If the idea shows a creative promise but requires a major overhaul, modify the idea such that it is significantly improved in terms of creativity. Do NOT simply polish it or add small elements. Use this format:
     "Modify: [full idea after modification] - Reason: [specific reason for improvement]."
-  - **Replace:** If the idea is not creative or not aligned with the task objective, replace it with one from the shared replacement pool of top ideas. Use this format:
+  - **Replace:** If the idea is not creative or not aligned with the task objective, replace it with one from the shared replacement pool of top ideas. If the replacement pool is empty, come up with a new creative idea of your own. Use this format:
     "Replace: [full replacement idea] - Reason: [specific reason for replacement]."
 - The idea should be around 80-100 words.
 """
@@ -192,7 +192,7 @@ PS_DISCUSSION_RATING_PRE = """
   - **Agree:** If the idea meets the task objective and does not require changes, reply "Agree: No changes needed."
   - **Modify:** If the idea shows a creative promise but requires a major overhaul, modify the idea such that it is significantly improved in terms of creativity. Do NOT simply polish it or add small elements. Use this format:
     "Modify: [full idea after modification] - Reason: [specific reason for improvement]."
-  - **Replace:** If the idea is not creative or not aligned with the task objective, replace it with one from the shared replacement pool of top ideas. Use this format:
+  - **Replace:** If the idea is not creative or not aligned with the task objective, replace it with one from the shared replacement pool of top ideas. If the replacement pool is empty, come up with a new creative idea of your own. Use this format:
     "Replace: [full replacement idea] - Reason: [specific reason for replacement]."
 - The idea should be around 80-100 words.
 """
@@ -401,16 +401,10 @@ INTENTION_PROMPT_IDEA = """
 """
 
 INTENTION_SCORING = """
-**Discussion Context:**\n{history_text}\n\n
-**Your Potential Contribution:**\n{agent_potential_response}\n\n
-**Task:** Considering the context and your potential contribution, rate how strongly you feel the need to respond or contribute **at this moment**. Use a scale of 1 (very low need) to 10 (very high need).
-Respond ONLY with the numerical score (e.g., '1').
-"""
-
-INTENTION_SCORING = """
 **Current Idea:**:\n{current_idea}\n\n
 **Your Potential Contribution:**\n{agent_potential_response}\n\n
 **Task:** Considering the context and your potential contribution, rate how strongly you feel the need to respond or contribute **at this moment**. Use a scale of 1 (very low need) to 10 (very high need).
+Important: Use the FULL range from 1-10.
 Respond ONLY with the numerical score (e.g., '1').
 """
 

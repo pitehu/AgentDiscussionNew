@@ -370,6 +370,18 @@ class Conversation:
                 file.write("\n\n=== Token Usage Summary ===\n")
                 file.write(self.get_token_summary())
                 
+
+                # Record the actual rounds that were run
+                max_round = 0
+                if self.chat_history:
+                    # Extract integer round numbers, ignore others ('N/A', None, etc.)
+                    int_rounds = [entry['round'] for entry in self.chat_history if isinstance(entry.get('round'), int)]
+                    if int_rounds:
+                        max_round = max(int_rounds)
+                # Write the calculated max round number near the top
+                file.write(f"\n\n=== Total Rounds Executed: {max_round} ===\n")
+
+
                 # Add idea evolution history
                 file.write("\n\n=== Idea Evolution History ===\n")
                 idea_history = self.extract_idea_evolution()

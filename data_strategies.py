@@ -44,30 +44,24 @@ class GenericDataStrategy:
     # ------------------ Idea Generation ------------------
     def collect_ideas(self, agent_name, agent_response):
         lines = self._extract_lines(agent_response)
+        # This part remains the same
         for l in lines:
             self.all_ideas.append({'idea': l, 'agent': agent_name})
 
     def _extract_lines(self, text):
+        """
+        Extracts each non-empty line from the text as a separate item.
+        """
         results = []
-        current_idea = []
-        
+        # Split the text into lines
         for line in text.strip().split('\n'):
+            # Remove leading/trailing whitespace
             stripped_line = line.strip()
-
-            if re.match(r"^(?:-\s*)?(?:\*\*)?[1-9]\d*\.(?:\*\*)?\s", stripped_line):
-                if current_idea:
-                    results.append(" ".join(current_idea).strip())
-                    current_idea = []
-                
-                stripped_line = re.sub(r"^(?:-\s*)?(?:\*\*)?[1-9]\d*\.(?:\*\*)?\s", "", stripped_line).strip()
-            
+            # If the line has content after stripping, add it to results
             if stripped_line:
-                current_idea.append(stripped_line)
-    
-        if current_idea:
-            results.append(" ".join(current_idea).strip())
-
+                results.append(stripped_line)
         return results
+
 
 
     # ------------------ Selection Phase ------------------

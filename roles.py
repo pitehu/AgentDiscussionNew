@@ -42,13 +42,13 @@ def get_randomized_roles_with_fixed_same():
         # Optional: Add prefix only to randomized ones, or adjust as needed
         prefix = f"You are Agent {agent_number}. "
         if i < len(profiles):
-            randomized_roles[key] = prefix + profiles[i]
+            randomized_roles[key] = prefix + profiles[i] + " You have the knowledge of this person. You talk like this person. You think like this person."
         else:
             # Handle case where there are fewer profiles than keys
             randomized_roles[key] = prefix + "No profile assigned." # Or just assign empty string, or raise error
 
     # --- Minimal Change: Add the fixed Same_Persona back ---
-    randomized_roles["Same_Persona"] = SAME_PERSONA_DESCRIPTION
+    randomized_roles["Same_Persona"] = SAME_PERSONA_DESCRIPTION+ " You have the knowledge of this person. You talk like this person. You think like this person."
     # --- End of Minimal Change ---
 
     return randomized_roles

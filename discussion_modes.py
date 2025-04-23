@@ -116,7 +116,7 @@ class GenericDiscussionMode:
             resp, prompt_tokens, completion_tokens, reasoning_tokens = agent.generate_response(msgs)
             # Updated: pass current_ideas and round_number for proper idea evolution logging.
             self.conversation.update_phase_token_usage("discussion", prompt_tokens, completion_tokens, reasoning_tokens)
-            self.data_strategy.update_shared_data(self.conversation, resp)
+            #self.data_strategy.update_shared_data(self.conversation, resp)
             self.conversation.add_chat_entry(agent.model_name, agent.name, "\n".join(m["content"] for m in msgs), resp, "open_discussion", current_ideas = self.data_strategy.current_ideas, round_number=total_resp+1)
 
             print(f"[open_discussion] {agent.name} => {resp}")
@@ -283,7 +283,7 @@ class GenericDiscussionMode:
             else:
                 ranking_msgs.append({"role":role,"content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['PS_Overall'].strip()}"})
 
-            ranking_prompt = ("We define creativity as a combination of novelty (how original or unexpected the idea is in this context) and usefulness (its potential practical value or impact in addressing the goal)."
+            ranking_prompt = ("We define creativity as a combination of novelty (how original or unexpected the idea is in this context) and usefulness (its potential practical value or impact in addressing the goal). "
             "Please output the BEST idea based on creativity.\n"
             "Ideas to rank:\n"
             f"{ideas_text}\n"
@@ -341,14 +341,24 @@ class GenericDiscussionMode:
                 
             if convergence_counter >= convergence_threshold:
                 print(f"[iterative_refinement] No improvements for {convergence_threshold} rounds. Early stopping.")
+                # Log the final chosen idea
+                self.conversation.add_chat_entry(
+                    agent.model_name,
+                    agent.name,
+                    "",
+                    f"Replaced: {replacement_made}. Final idea for (Round {total_resp + 1}): {self.data_strategy.current_ideas[0]}",
+                    "discussion",
+                    current_ideas=self.data_strategy.current_ideas,
+                    round_number=total_resp + 1
+                )
                 break
 
             # Log the final chosen idea
             self.conversation.add_chat_entry(
                 agent.model_name,
                 agent.name,
-                "", 
-                f"Replaced: {replacement_made}. Final idea for (Round {total_resp+1}): {self.data_strategy.current_ideas[0]}", 
+                "",
+                f"Replaced: {replacement_made}. Final idea for (Round {total_resp+1}): {self.data_strategy.current_ideas[0]}",
                 "discussion",
                 current_ideas = self.data_strategy.current_ideas,
                 round_number=total_resp+1
@@ -541,14 +551,13 @@ class GenericDiscussionMode:
         if self.task_config.get("discussion_order_method")=="random":
             random.shuffle(agents)
 
-        shuffled_ideas_for_presentation = self.data_strategy.all_ideas[:] # Make a copy
-        random.shuffle(shuffled_ideas_for_presentation)
+        random.shuffle(self.data_strategy.all_ideas) # Make a copy
 
         for ag in agents:
             self.conversation.current_agent= ag
             msgs= self.message_strategy.construct_messages(ag, 'selection', self.conversation)
 
-            lines=[f"Idea {i+1}: {x['idea']}" for i,x in enumerate(shuffled_ideas_for_presentation)]
+            lines=[f"Idea {i+1}: {x['idea']}" for i,x in enumerate(self.data_strategy.all_ideas)]
             msgs.append({"role":"assistant","content":"\n".join(lines)})
 
             # Generate response and get token usage
@@ -576,15 +585,14 @@ class GenericDiscussionMode:
         agents = self.conversation.agents[:]
         if self.task_config.get("discussion_order_method") == "random":
             random.shuffle(agents)
-        shuffled_ideas_for_presentation = self.data_strategy.all_ideas[:] # Make a copy
-        random.shuffle(shuffled_ideas_for_presentation)
+        random.shuffle(self.data_strategy.all_ideas) # Make a copy
 
         for ag in agents:
             self.conversation.current_agent = ag
             # Use selection_novelty instead of regular selection prompt
             msgs = self.message_strategy.construct_messages(ag, 'selection_novelty', self.conversation)
             
-            lines = [f"Idea {i+1}: {x['idea']}" for i,x in enumerate(shuffled_ideas_for_presentation)]
+            lines = [f"Idea {i+1}: {x['idea']}" for i,x in enumerate(self.data_strategy.all_ideas)]
             msgs.append({"role": "assistant", "content": "\n".join(lines)})
 
             resp, prompt_tokens, completion_tokens, reasoning_tokens = ag.generate_response(msgs)
@@ -781,6 +789,23 @@ class GenericDiscussionMode:
                         print(f"Agreement phrase '{expected_agree_phrase}' not found.")
                 if agree_count == len(remain):
                     print(f"All agents agreed (all_at_once, order: {disc_order}).")
+
+
+                    # Log this agreement round before exiting
+
+                    self.conversation.add_chat_entry(
+                        agent='System',  # Keyword doesn't match 'model_name'
+                        agent_model='Agreement Protocol',  # Keyword doesn't match 'agent_name'
+                        prompt='N/A (Early agreement detected in potential responses)',
+                        response='All remaining agents generated potential responses indicating agreement.',
+                        phase='discussion',  # Keyword matches 'phase'
+                        current_ideas=self.data_strategy.current_ideas,
+                        round_number=total_resp + 1
+                    )
+
+                    total_resp += 1 # Increment count because this round *did* happen (it resulted in agreement)
+
+
                     self._print_final()
                     return
 
