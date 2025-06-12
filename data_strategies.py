@@ -8,6 +8,11 @@ from openai import OpenAI
 from typing import List
 from utils import calculate_tokens
 from azure_model_service import AzureModelService
+logging.basicConfig(
+    filename='/mnt/nas_home/th656/code/CSS/LLM_creativity_proj/v3/data_discussion.log',
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s:%(message)s'
+)
 
 class GenericDataStrategy:
     def __init__(self, task_config):
@@ -278,85 +283,424 @@ class GenericDataStrategy:
                 elif discussion_method == "one_by_one":
                     return self._parse_direct_one_by_one_response(agent_response, agent_name)
             elif ttype == 'PS':
-                return self._parse_direct_one_by_one_response(agent_response, agent_name)
+                return self._parse_one_by_one_response(agent_response, agent_name)
             else:
                 raise ValueError(f"Unsupported discussion method for direct_discussion: {discussion_method}")
 
-
     def _parse_one_by_one_response(self, agent_response, agent_name):
         """
-        GPT + pydantic parse approach => we must provide current_ideas, replacement_ideas, agent_name in the prompt.
+        Manual parsing approach that doesn't depend on LLM.
+        Preserves the same interface and output format as the original function.
         """
-        class AgentResponse(BaseModel):
-            action_type: str  # "agree", "modify", or "replace"
-            current_ideas: List[str]  
-            replacement_ideas: List[str]
-            replaced_ideas: str = None  
-
-        # 1) figure out which replacement pool to display:
+        # 1) Figure out which replacement pool to display (same as original)
         sel_method = self.task_config.get("selection_method", "rating")
         if sel_method == "rating":
-            # Shared
             rep_list = self.replacement_ideas
         else:
-            # selectionTop => each agent has their own replacement pool
-            # if not exist => fallback empty
             rep_list = self.agent_replacement_ideas.get(agent_name, [])
 
-        # 2) build the strings
-        current_str = "\n".join(f"- {idea}" for idea in self.current_ideas)
-        replacement_str = "\n".join(f"- {idea}" for idea in rep_list)
+        # Default response structure (for "agree" case or fallback)
+        result = {
+            "action_type": "agree",
+            "current_ideas": self.current_ideas.copy(),
+            "replacement_ideas": rep_list.copy(),
+            "replaced_ideas": None
+        }
 
-        system_msg_one_by_one = f"""Here is the current list of ideas:
-        {current_str if current_str else "(none)"}
+        # Parse the agent's response to determine action_type
+        response_lines = agent_response.strip().split('\n')
+        first_line = response_lines[0].strip() if response_lines else ""
 
-        Here is the replacement ideas list:
-        {replacement_str if replacement_str else "(none)"}
+        # Helper function to extract the idea, trimming off "- Reason:" and everything after it
+        def extract_idea(text):
+            if "- Reason:" in text:
+                return text.split("- Reason:")[0].strip()
+            elif " - Reason:" in text:
+                return text.split(" - Reason:")[0].strip()
+            return text.strip()
 
-        Based on the agent's response, judge whether the agent:
-        - **Agrees** with the current ideas without suggesting any changes. The agent explicitly says "Agree:..."
-        - **Modifies** any of the current ideas. The agent explicitly says "Modify:..."
-        - **Replaces** any of the current ideas with one from the replacement pool. The agent explicitly says "Replace:..."
+        # Check for explicit prefixes in the first line
+        if first_line.startswith("Agree:"):
+            # Do nothing for "agree" as default values are already set
+            pass
 
-        For each action, the agent must ensure that the lists reflect the following updates:
+        elif first_line.startswith("Modify:"):
+            # Extract the modified idea (everything after "Modify:" but before "- Reason:")
+            modified_idea = extract_idea(first_line[len("Modify:"):].strip())
 
-        1. **Agree**: 
-            - If the agent agrees, the `current_ideas` remain unchanged.
-            - The `replacement_ideas` list also remains unchanged.
+            # If there's no content after "Modify:", try to extract from subsequent lines
+            if not modified_idea and len(response_lines) > 1:
+                for line in response_lines[1:]:
+                    if line.strip() and not line.startswith("Reason:"):
+                        modified_idea = extract_idea(line.strip())
+                        break
 
-        2. **Modify**:
-            - If the agent modifies an idea, update the `current_ideas` list with the modified version of the idea.
-            - The `replacement_ideas` list remains unchanged.
+            if modified_idea:
+                result["action_type"] = "modify"
+                result["current_ideas"] = [modified_idea]
 
-        3. **Replace**:
-            - If the agent replaces an idea:
-                - Update the `current_ideas` list by the agent's newply proposed idea, VERBATIM.
-                - Remove the selected replacement idea from the `replacement_ideas` list. Skip if there is no replacement idea.
-                - Move the replaced idea to the `replaced_ideas` list by appending this list.
-        
-        **Important**:
-            - The `current_ideas` list must only include **one idea**. If the agent modifies or replaces an idea, ensure that the `current_ideas` list reflects this change.
-            - The `replacement_ideas` list must reflect the updated pool after any replacements.
-            - The `replaced_ideas` list must include the replaced idea(s) for record-keeping.
-            - You MUST preserve the VERBATIM original text and formatting of all idea strings in the output. 
+        elif first_line.startswith("Replace:"):
+            # Extract the replacement idea (everything after "Replace:" but before "- Reason:")
+            replacement_idea = extract_idea(first_line[len("Replace:"):].strip())
 
-        The expected output JSON structure should detail the action taken, the updated list of current ideas (only include one idea), an updated list of replacement ideas and an updated list of replaced ideas, all must in full and not shortened:
-        {{
-            "action_type": "agree/modify/replace",
-            "current_ideas": [],
-            "replacement_ideas": [],
-            "replaced_ideas": [],
-        }}
-        """.strip()
+            # If there's no content after "Replace:", try to extract from subsequent lines
+            if not replacement_idea and len(response_lines) > 1:
+                for line in response_lines[1:]:
+                    if line.strip() and not line.startswith("Reason:"):
+                        replacement_idea = extract_idea(line.strip())
+                        break
 
-        messages = [
-            {"role": "system", "content": system_msg_one_by_one},
-            {"role": "user", "content": agent_response}
-        ]
+            if replacement_idea:
+                # Check if the replacement idea matches any in rep_list
+                match_found = False
+                for idx, idea in enumerate(rep_list):
+                    if replacement_idea.strip() == idea.strip():
+                        match_found = True
 
-        return self._call_gpt_and_parse(messages, AgentResponse)
-        
-    
+                        # Set action_type to replace
+                        result["action_type"] = "replace"
+
+                        # Update current_ideas with the replacement
+                        result["current_ideas"] = [idea]
+
+                        # Store the replaced idea
+                        replaced_idea = self.current_ideas[0] if self.current_ideas else None
+                        result["replaced_ideas"] = replaced_idea
+
+                        # Update replacement_ideas by removing the used idea
+                        updated_rep_list = rep_list.copy()
+                        updated_rep_list.pop(idx)
+                        result["replacement_ideas"] = updated_rep_list
+                        break
+
+                # If no match found in replacement pool, use as-is
+                if not match_found:
+                    result["action_type"] = "replace"
+                    result["current_ideas"] = [replacement_idea]
+                    result["replaced_ideas"] = self.current_ideas[0] if self.current_ideas else None
+
+        # Create a mock response object with the same structure as the original function
+        class MockAgentResponse:
+            def __init__(self, data):
+                self.action_type = data["action_type"]
+                self.current_ideas = data["current_ideas"]
+                self.replacement_ideas = data["replacement_ideas"]
+                self.replaced_ideas = data["replaced_ideas"]
+
+        mock_response = MockAgentResponse(result)
+
+        # Return the structure expected by the calling function
+        return mock_response, 0, 0, 0  # Object, prompt_tokens, completion_tokens, reasoning_tokens    # def _parse_one_by_one_response(self, agent_response, agent_name):
+
+
+    def _parse_one_by_one_response_validate(self, agent_response, agent_name):
+        """
+        Manual parsing approach that doesn't depend on LLM.
+        Preserves the same interface and output format as the original function.
+        """
+        # 1) Figure out which replacement pool to display (same as original)
+        sel_method = self.task_config.get("selection_method", "rating")
+        if sel_method == "rating":
+            rep_list = self.replacement_ideas
+        else:
+            rep_list = self.agent_replacement_ideas.get(agent_name, [])
+
+        # Default response structure (for "agree" case or fallback)
+        result = {
+            "action_type": "agree",
+            "current_ideas": self.current_ideas.copy(),
+            "replacement_ideas": rep_list.copy(),
+            "replaced_ideas": None
+        }
+
+        # Parse the agent's response to determine action_type
+        response_lines = agent_response.strip().split('\n')
+        first_line = response_lines[0].strip() if response_lines else ""
+
+        # Helper function to extract the idea, trimming off "- Reason:" and everything after it
+        def extract_idea(text):
+            if "- Reason:" in text:
+                return text.split("- Reason:")[0].strip()
+            elif " - Reason:" in text:
+                return text.split(" - Reason:")[0].strip()
+            return text.strip()
+
+        # Check for explicit prefixes in the first line
+        if first_line.startswith("Agree:"):
+            # Do nothing for "agree" as default values are already set
+            pass
+
+        elif first_line.startswith("Modify:"):
+            # Extract the modified idea (everything after "Modify:" but before "- Reason:")
+            modified_idea = extract_idea(first_line[len("Modify:"):].strip())
+
+            # If there's no content after "Modify:", try to extract from subsequent lines
+            if not modified_idea and len(response_lines) > 1:
+                for line in response_lines[1:]:
+                    if line.strip() and not line.startswith("Reason:"):
+                        modified_idea = extract_idea(line.strip())
+                        break
+
+            if modified_idea:
+                result["action_type"] = "modify"
+                result["current_ideas"] = [modified_idea]
+
+        elif first_line.startswith("Replace:"):
+            # Extract the replacement idea (everything after "Replace:" but before "- Reason:")
+            replacement_idea = extract_idea(first_line[len("Replace:"):].strip())
+
+            # If there's no content after "Replace:", try to extract from subsequent lines
+            if not replacement_idea and len(response_lines) > 1:
+                for line in response_lines[1:]:
+                    if line.strip() and not line.startswith("Reason:"):
+                        replacement_idea = extract_idea(line.strip())
+                        break
+
+            if replacement_idea:
+                # Only allow replacement if the idea is in the pool and pool is not empty
+                logging.info(f"PRE-CHECK: Agent {agent_name} replacement idea: {replacement_idea}")
+                logging.info(f"PRE-CHECK: Updated replacement idea pool: {rep_list}")
+                condition_met = rep_list and replacement_idea.strip() in [idea.strip() for idea in rep_list]
+                logging.info(f"DEBUG: Condition evaluated to: {condition_met}")
+
+                if not rep_list or replacement_idea.strip() in [idea.strip() for idea in rep_list]:
+                    logging.info(
+                        f"CONDITION MET: Agent {agent_name} replacement idea valid (empty pool or found in pool).")
+                    logging.info(f"CONDITION MET: replacement_idea was: {replacement_idea}")
+
+                    result["action_type"] = "replace"
+                    result["current_ideas"] = [replacement_idea]
+                    replaced_idea = self.current_ideas[0] if self.current_ideas else None
+                    result["replaced_ideas"] = replaced_idea
+
+                    if rep_list:
+                        try:
+                            idx = [idea.strip() for idea in rep_list].index(replacement_idea.strip())
+                            logging.info(f"CONDITION MET: Found at index {idx} with value: {rep_list[idx]}")
+                            updated_rep_list = rep_list.copy()
+                            updated_rep_list.pop(idx)
+                            result["replacement_ideas"] = updated_rep_list
+                        except ValueError:
+                            logging.info(f"CONDITION MET: Idea not in list, but empty pool allowed.")
+                            result["replacement_ideas"] = rep_list.copy()
+                    else:
+                        logging.info(f"CONDITION MET: Empty replacement pool, any replacement allowed.")
+                        result["replacement_ideas"] = []
+                else:
+                    logging.info(f"CONDITION NOT MET: Agent {agent_name} replacement idea NOT found in pool.")
+                    logging.info(f"CONDITION NOT MET: replacement_idea was: {replacement_idea}")
+
+                    # If not in pool, treat as invalid: return None to signal regeneration
+                    return None, 0, 0, 0
+        else:
+            return None, 0, 0, 0
+        # Create a mock response object with the same structure as the original function
+        class MockAgentResponse:
+            def __init__(self, data):
+                self.action_type = data["action_type"]
+                self.current_ideas = data["current_ideas"]
+                self.replacement_ideas = data["replacement_ideas"]
+                self.replaced_ideas = data["replaced_ideas"]
+
+        mock_response = MockAgentResponse(result)
+
+        # Return the structure expected by the calling function
+        return mock_response, 0, 0, 0  # Object, prompt_tokens, completion_tokens, reasoning_tokens    # def _parse_one_by_one_response(self, agent_response, agent_name):
+
+
+    #     """
+    #     GPT + pydantic parse approach => we must provide current_ideas, replacement_ideas, agent_name in the prompt.
+    #     """
+    #     class AgentResponse(BaseModel):
+    #         action_type: str  # "agree", "modify", or "replace"
+    #         current_ideas: List[str]
+    #         replacement_ideas: List[str]
+    #         replaced_ideas: str = None
+    #
+    #     # 1) figure out which replacement pool to display:
+    #     sel_method = self.task_config.get("selection_method", "rating")
+    #     if sel_method == "rating":
+    #         # Shared
+    #         rep_list = self.replacement_ideas
+    #     else:
+    #         # selectionTop => each agent has their own replacement pool
+    #         # if not exist => fallback empty
+    #         rep_list = self.agent_replacement_ideas.get(agent_name, [])
+    #
+    #     # 2) build the strings
+    #     current_str = "\n".join(f"- {idea}" for idea in self.current_ideas)
+    #     replacement_str = "\n".join(f"- {idea}" for idea in rep_list)
+    #
+    #     system_msg_one_by_one = f"""Here is the current list of ideas:
+    #     {current_str if current_str else "(none)"}
+    #
+    #     Here is the replacement ideas list:
+    #     {replacement_str if replacement_str else "(none)"}
+    #
+    #     Based on the agent's response, judge whether the agent:
+    #     - **Agrees** with the current ideas without suggesting any changes. The agent explicitly says "Agree:..."
+    #     - **Modifies** any of the current ideas. The agent explicitly says "Modify:..."
+    #     - **Replaces** any of the current ideas with one from the replacement pool. The agent explicitly says "Replace:..."
+    #
+    #     For each action, the agent must ensure that the lists reflect the following updates:
+    #
+    #     1. **Agree**:
+    #         - If the agent agrees, the `current_ideas` remain unchanged.
+    #         - The `replacement_ideas` list also remains unchanged.
+    #
+    #     2. **Modify**:
+    #         - If the agent modifies an idea, update the `current_ideas` list with the modified version of the idea.
+    #         - The `replacement_ideas` list remains unchanged.
+    #
+    #     3. **Replace**:
+    #         - If the agent replaces an idea:
+    #             - Update the `current_ideas` list by the agent's newly proposed idea, VERBATIM.
+    #             - Remove the selected replacement idea from the `replacement_ideas` list. Skip if there is no replacement idea.
+    #             - Move the replaced idea to the `replaced_ideas` list by appending this list.
+    #
+    #     **Important**:
+    #         - The `current_ideas` list must only include **one idea**. If the agent modifies or replaces an idea, ensure that the `current_ideas` list reflects this change.
+    #         - The `replacement_ideas` list must reflect the updated pool after any replacements.
+    #         - The `replaced_ideas` list must include the replaced idea(s) for record-keeping.
+    #         - You MUST preserve the VERBATIM original text and formatting of all idea strings in the output.
+    #
+    #     Note that you should not include any reasoning from the raw agent response in the output.
+    #     The expected output JSON structure should detail the action taken, the updated list of current ideas (only include one idea), an updated list of replacement ideas and an updated list of replaced ideas, all must in full and not shortened:
+    #     {{
+    #         "action_type": "agree/modify/replace",
+    #         "current_ideas": [],
+    #         "replacement_ideas": [],
+    #         "replaced_ideas": [],
+    #     }}
+    #     """.strip()
+    #
+    #
+    #
+    #
+    #
+    #     messages = [
+    #         {"role": "system", "content": system_msg_one_by_one},
+    #         {"role": "user", "content": agent_response}
+    #     ]
+    #
+    #     return self._call_gpt_and_parse(messages, AgentResponse)
+
+#     def _parse_one_by_one_response(self, agent_response, agent_name):
+#         """
+#         GPT + pydantic parse approach => we must provide current_ideas,
+#         replacement_ideas, existing replaced_ideas, and agent_name in the prompt.
+#         """
+#         class AgentResponse(BaseModel):
+#             action_type: str
+#             current_ideas: List[str]
+#             replacement_ideas: List[str]
+#             # Changed to List[str] to store cumulative replaced ideas
+#             replaced_ideas: List[str]
+
+#         # 1) Figure out which replacement pool to display:
+#         sel_method = self.task_config.get("selection_method", "rating")
+#         if sel_method == "rating":
+#             rep_list = self.replacement_ideas
+#         else:
+#             rep_list = self.agent_replacement_ideas.get(agent_name, [])
+
+#         # 2) Build the strings for context
+#         current_idea_text = self.current_ideas[0] if self.current_ideas else "(No current idea provided)"
+#         replacement_context_text = "\n".join(f"- {idea}" for idea in rep_list) if rep_list else "(No replacement ideas available)"
+#         # Get the *current* list of already replaced ideas from the strategy state
+#         existing_replaced_ideas_list = self.replaced_ideas if hasattr(self, 'replaced_ideas') else []
+#         existing_replaced_context_text = "\n".join(f"- {idea}" for idea in existing_replaced_ideas_list) if existing_replaced_ideas_list else "(None yet)"
+
+#         # Create JSON representations for use *within* the prompt's example outputs
+#         replacement_json_list_str = json.dumps(rep_list)
+#         existing_replaced_json_list_str = json.dumps(existing_replaced_ideas_list) # JSON list of existing replaced ideas
+
+#         # --- System Prompt Modified for Cumulative replaced_ideas ---
+#         system_msg_one_by_one = f"""You are a precise parser analyzing an agent's response to update a conversation state.
+
+# **Context:**
+# Current Idea:
+# - {current_idea_text}
+
+# Available Replacement Ideas Pool:
+# {replacement_context_text}
+
+# History of Previously Replaced Ideas:
+# {existing_replaced_context_text}
+
+# **Your Task:**
+# Analyze the agent's response provided by the user. Determine the agent's action and update the state according to the following strict rules. Output *only* the final JSON object.
+
+# **Rules & Processing Steps:**
+
+# 1.  **Identify Action Prefix:** Check if the agent's response STARTS EXACTLY with "Agree:", "Modify:", or "Replace:".
+#     *   **If no exact prefix is found:** Assume the action is "agree". Proceed to step 2.
+#     *   **If a prefix is found:** Proceed to the corresponding step (2, 3, or 4).
+
+# 2.  **Action: Agree**
+#     *   Condition: Agent response starts with "Agree:" OR no valid prefix was found.
+#     *   Output JSON:
+#         ```json
+#         {{
+#             "action_type": "agree",
+#             "current_ideas": ["{current_idea_text}"],
+#             "replacement_ideas": {replacement_json_list_str},
+#             "replaced_ideas": {existing_replaced_json_list_str}
+#         }}
+#         ```
+#     *   Note: Use EXACT original texts. `replaced_ideas` is the *unchanged* historical list from the context.
+
+# 3.  **Action: Modify**
+#     *   Condition: Agent response starts with "Modify:".
+#     *   Processing: Extract the *complete, verbatim* text of the modified idea following "Modify:". Discard reasoning.
+#     *   Output JSON:
+#         ```json
+#         {{
+#             "action_type": "modify",
+#             "current_ideas": ["<EXTRACTED_MODIFIED_IDEA_TEXT_VERBATIM>"],
+#             "replacement_ideas": {replacement_json_list_str},
+#             "replaced_ideas": {existing_replaced_json_list_str}
+#         }}
+#         ```
+#     *   Note: `current_ideas` contains the *full modified text*. `replacement_ideas` and `replaced_ideas` remain unchanged from the context.
+
+# 4.  **Action: Replace**
+#     *   Condition: Agent response starts with "Replace:".
+#     *   Processing:
+#         a.  Extract the *complete, verbatim* text of the proposed replacement idea following "Replace:". Discard reasoning. Let's call this `extracted_replacement_text`.
+#         b.  **CRITICAL VALIDATION:** Check if `extracted_replacement_text` EXACTLY MATCHES any idea in the `Available Replacement Ideas Pool` listed in the Context section above.
+#         c.  **If EXACT MATCH FOUND:**
+#             i.  The matched idea text is `extracted_replacement_text`.
+#             ii. Create the `updated_replacement_pool_list` by removing `extracted_replacement_text` from the original pool.
+#             iii. Create the `updated_replaced_ideas_list` by taking the `History of Previously Replaced Ideas` list from the Context and **appending** the original `Current Idea` (`{current_idea_text}`) to it.
+#             iv. Output JSON:
+#                 ```json
+#                 {{
+#                     "action_type": "replace",
+#                     "current_ideas": ["<EXTRACTED_REPLACEMENT_TEXT_VERBATIM>"],
+#                     "replacement_ideas": <JSON_REPRESENTATION_OF_updated_replacement_pool_list>,
+#                     "replaced_ideas": <JSON_REPRESENTATION_OF_updated_replaced_ideas_list>
+#                 }}
+#                 ```
+#                 (Replace placeholders `<...>` with actual derived values. Ensure `replacement_ideas` and `replaced_ideas` are valid JSON lists containing the full verbatim text).
+#         d.  **If NO EXACT MATCH FOUND:** The agent failed instruction. Treat as "agree". Output JSON as specified in Step 2.
+
+# **Output Requirements:**
+# - Output ONLY the JSON object. Do not include any explanatory text.
+# - Ensure all idea text in the JSON is full, verbatim text. Do not shorten, summarize, or include reasoning.
+# - `current_ideas` must contain exactly one string item.
+# - `replacement_ideas` must be a list of strings (a valid JSON list).
+# - `replaced_ideas` must be a list of strings (a valid JSON list, updated cumulatively on replace actions).
+#         """.strip()
+#         # --- End of Corrected System Prompt ---
+
+#         messages = [
+#             {"role": "system", "content": system_msg_one_by_one},
+#             {"role": "user", "content": agent_response}
+#         ]
+
+#         return self._call_gpt_and_parse(messages, AgentResponse)
+
     def _parse_all_at_once_response(self, agent_response, agent_name):
         """
         Parses the agent's response for all ideas in all_at_once discussion mode with a simplified action_type.
@@ -526,8 +870,8 @@ class GenericDataStrategy:
 
         Updates to apply:
         1. **Agree**: Keep the `current_ideas` unchanged.
-        2. **Modify**: URevise the `current_ideas` by incorporating the proposed modifications, ensuring the updated version accurately reflects the changes.
-        3. **Replace**: Replace the idea in `current_ideas` with the proposed new idea. Ensure the updated `current_ideas` list contains exactly one idea. Discard the replaced idea and move it to the `replaced_ideas` list for record-keeping.
+        2. **Modify**: Revise the `current_ideas` by incorporating the proposed modifications, ensuring the updated version accurately reflects the changes. Please make sure to include only the idea, not the reasoning, in your response. 
+        3. **Replace**: Replace the idea in `current_ideas` with the proposed new idea. Ensure the updated `current_ideas` list contains exactly one idea. Discard the replaced idea and move it to the `replaced_ideas` list for record-keeping. Please make sure to include only the idea, not the reasoning, in your response.
 
         Expected output JSON:
         {{

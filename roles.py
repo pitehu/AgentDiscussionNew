@@ -23,17 +23,17 @@ SAME_PERSONA_DESCRIPTION = 'You are a 24-year-old White female with a graduate d
 # print(json.dumps(ALL_PROFILES, indent=4))
 
 
-def get_randomized_roles_with_fixed_same():
+def get_randomized_roles_with_fixed_same(number_of_profiles=3):
     """
     Shuffles the base roles (excluding Same_Persona) and assigns them
     to Persona_X keys, prepending an agent identifier.
     Adds the fixed Same_Persona back into the dictionary.
     """
-    profiles = list(BASE_ROLES.values()) # Use only the pool meant for randomization
+    profiles = list(BASE_ROLES.values())[:number_of_profiles]  # Only first N profiles
     random.shuffle(profiles)
 
     # Define the keys for the roles being randomized
-    keys_to_randomize = ["Persona_1", "Persona_2", "Persona_3","Persona_4", "Persona_5", "Persona_6"] # Adjust as needed
+    keys_to_randomize = [f"Persona_{i+1}" for i in range(number_of_profiles)]
 
     # Create the dictionary for randomized roles
     randomized_roles = {}
@@ -56,12 +56,5 @@ def get_randomized_roles_with_fixed_same():
 # --- Example Usage ---
 # This call now generates a ROLES dictionary that includes the fixed
 # 'Same_Persona' and randomized 'Persona_1', 'Persona_2', etc.
-ROLES = get_randomized_roles_with_fixed_same()
 
 
-
-# Print the generated roles to see the result
-for key, role_description in ROLES.items():
-    print(f"--- {key} ---")
-    print(role_description)
-    print("\n") 

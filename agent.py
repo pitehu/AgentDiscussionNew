@@ -21,9 +21,9 @@ class Agent:
         """
         if model_name == 'deepseek-ai/DeepSeek-R1':
             return DeepSeekModelService()
-        elif model_name == 'gemini-2.0-flash-thinking-exp':
+        elif model_name in ['gemini-2.0-flash-thinking-exp','gemini-2.5-pro-preview-05-06']:
             return GeminiModelService()
-        elif model_name in ["o1-mini", "o3-mini", "gpt-4o", "o1"]:
+        elif model_name in ["o1-mini", "o3-mini","o4-mini", "gpt-4o", "o1",'gpt-4.1','o3']:
             return AzureModelService()
         else:
             raise ValueError(f"Unsupported model: {model_name}")
@@ -33,17 +33,19 @@ class Agent:
         Generate a response using OpenAI API and return the reply along with token counts.
         """
         temperature = self.config.get("temperature", DEFAULT_TEMPERATURE)
+        reasoning_effort = self.config.get("reasoning_effort", None)
+
+        args = {
+            "messages": messages,
+            "model": self.model_name,
+            "temperature": temperature
+        }
+        if reasoning_effort is not None:
+            args["reasoning_effort"] = reasoning_effort
 
 
         try:
-            # Normal response generation for other models
-            response, prompt_tokens, completion_tokens, reasoning_tokens = self.model_service.generate_response(
-                messages=messages,
-                model=self.model_name,
-                temperature=temperature
-            )
-
-            print(response)
+            response, prompt_tokens, completion_tokens, reasoning_tokens = self.model_service.generate_response(**args)
 
             self.history.append({"role": "assistant", "content": response})
 

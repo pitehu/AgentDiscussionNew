@@ -1,6 +1,5 @@
 # main.py
-
-from roles import ROLES
+from roles import *
 from agent import Agent
 from config import DEFAULT_MODEL, DEFAULT_TEMPERATURE
 from conversation import Conversation
@@ -9,13 +8,27 @@ from message_strategies import GenericMessageStrategy
 from discussion_modes import GenericDiscussionMode
 import logging
 
+def parse_model_and_effort(model_str):
+    # Accepts e.g. "o3-mini-high" or just "o3-mini"
+    parts = model_str.rsplit("-", 1)
+    if len(parts) == 2 and parts[1] in {"low", "medium", "high"}:
+        return parts[0], parts[1]
+    return model_str, None
+
 def main(llm_count=1, model = 'gpt-4o', temperature=1, persona_type=None, phases="three_stage", generation_method="dependent", 
          selection_method="rating", discussion_method="all_at_once", 
          discussion_order_method="fixed", task_type="PS", replacement_pool_size=0, 
-         skip_to_discussion=False, max_responses=30):
+         skip_to_discussion=False, max_responses=30, min_responses=None):
     try:
+        ROLES = get_randomized_roles_with_fixed_same(llm_count)
+
+        # Print the generated roles to see the result
+        for key, role_description in ROLES.items():
+            print(f"--- {key} ---")
+            print(role_description)
+            print("\n") 
         if persona_type == 'none':
-            system_messages = [""] * llm_count
+            system_messages = [f"You are Agent {i+1}." for i in range(llm_count)]
         elif persona_type == 'same':
             system_messages = [f"You are Agent {i+1}. {ROLES['Same_Persona']}" for i in range(llm_count)]
         elif persona_type == 'different':
@@ -23,19 +36,25 @@ def main(llm_count=1, model = 'gpt-4o', temperature=1, persona_type=None, phases
             system_messages = [ROLES[persona] for persona in personas[:llm_count]]
        
         # Handle single or multiple models
-        if isinstance(DEFAULT_MODEL, list):
-            if len(DEFAULT_MODEL) < llm_count:
+        if isinstance(model, list):
+            if len(model) < llm_count:
                 raise ValueError("Not enough models in DEFAULT_MODEL for the number of agents.")
-            agent_models = DEFAULT_MODEL[:llm_count]  # Assign models from the list
+            agent_models = model[:llm_count]  # Assign models from the list
         else:
-            agent_models = [DEFAULT_MODEL] * llm_count  # Use the same model for all agents
+            agent_models = [model] * llm_count  # Use the same model for all agents
 
-        # Create agents with assigned models
+        # Create agents with assigned models and reasoning efforts
         agents = []
+        reasoning_efforts = []
         for i, (system_message, model_name) in enumerate(zip(system_messages, agent_models)):
-            agent = Agent(name=f"Agent {i+1}", system_message=system_message, model_name=model_name)
+            base_model, reasoning_effort = parse_model_and_effort(model_name)
+            config = {"temperature": temperature}
+            if reasoning_effort:
+                config["reasoning_effort"] = reasoning_effort
+            agent = Agent(name=f"Agent {i+1}", system_message=system_message, model_name=base_model, config=config)
             agents.append(agent)
-        
+            reasoning_efforts.append(reasoning_effort)
+
         print(agents)
 
     #    agents = []
@@ -73,6 +92,8 @@ def main(llm_count=1, model = 'gpt-4o', temperature=1, persona_type=None, phases
             "replacement_pool_size": replacement_pool_size,
             "role_assignment_in_user_prompt": ["deepseek-ai/DeepSeek-R1"],
             "max_responses": max_responses,
+            "min_responses": min_responses,  # New config option to hide agree until specified round
+            "reasoning_efforts": reasoning_efforts,  # Add reasoning efforts to config
         }
 
         data_strategy = GenericDataStrategy(task_config=task_config)
@@ -84,6 +105,7 @@ def main(llm_count=1, model = 'gpt-4o', temperature=1, persona_type=None, phases
         discussion.run(skip_to_discussion=False)
     except Exception as e:
         logging.error("An error occurred during the discussion: %s", e)
+        raise
     finally:
         # Always try to save the chat history even if there was an error
         if 'conversation' in locals():
@@ -92,5 +114,5 @@ def main(llm_count=1, model = 'gpt-4o', temperature=1, persona_type=None, phases
 
 if __name__ == "__main__":
     # Default: False (set to True for debugging) 
-    main(llm_count=3, persona_type="same")
+    main(llm_count=3, persona_type="same", min_responses=30)  # Set hide_agree_until_round=30 for instruct mode
 

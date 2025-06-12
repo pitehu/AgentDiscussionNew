@@ -23,6 +23,7 @@ class Conversation:
             "idea_generation": {"prompt_tokens_used": 0, "completion_tokens_used": 0, "reasoning_tokens_used":0, "total_tokens_used": 0},
             "selection": {"prompt_tokens_used": 0, "completion_tokens_used": 0, "reasoning_tokens_used":0, "total_tokens_used": 0},
             "discussion": {"prompt_tokens_used": 0, "completion_tokens_used": 0, "reasoning_tokens_used":0, "total_tokens_used": 0},
+            "single_llm": {"prompt_tokens_used": 0, "completion_tokens_used": 0, "reasoning_tokens_used":0, "total_tokens_used": 0},
             "other": {"prompt_tokens_used": 0, "completion_tokens_used": 0, "reasoning_tokens_used":0, "total_tokens_used": 0},
         }
     
@@ -60,7 +61,7 @@ class Conversation:
             phase_prompt = usage.get("prompt_tokens_used", 0)
             phase_reasoning = usage.get("reasoning_tokens_used", 0)
             phase_completion = usage.get("completion_tokens_used", 0)
-            phase_total = phase_prompt + phase_completion
+            phase_total = phase_prompt + phase_completion + phase_reasoning
             total_prompt_tokens += phase_prompt
             total_reasoning_tokens += phase_reasoning
             total_completion_tokens += phase_completion
@@ -215,10 +216,12 @@ class Conversation:
         """
         MODEL_SHORT_NAMES = {
             "gemini-2.0-flash-thinking-exp": "gemini2-flash",
+            'gemini-2.5-pro-preview-05-06': "gemini2.5-pro",
             "deepseek-ai/DeepSeek-R1": "deepseek-R1",
             # Add other short names as needed
             "o1-mini": "o1-mini",
             "o3-mini": "o3-mini",
+            'o4-mini': 'o4-mini',
         }
 
         # Ensure model_name is processed correctly whether it's a string or list
@@ -313,12 +316,13 @@ class Conversation:
             persona_str = str(persona_type)
             phases_str = str(phases)
             order_str = str(discussion_order_method)
-
+            max_responses_str = str(self.task_config.get("max_responses", "unknown_max_responses"))
+            min_responses_str = str(self.task_config.get("min_responses", None))
             # Use specific values or "NA" for phase-dependent parts
             if phases == 'direct_discussion':
                 gen_method_str = "Direct" # Indicates no separate generation phase
-                disc_method_str = "NA"     # No specific discussion method needed here
-                pool_str = "NA"          # No replacement pool
+                disc_method_str = str(discussion_method)
+                pool_str = f"pool_{replacement_pool_size}"
             elif phases == 'three_stage':
                 gen_method_str = str(generation_method)
                 disc_method_str = str(discussion_method)
@@ -344,6 +348,8 @@ class Conversation:
                 disc_method_str,
                 order_str,
                 pool_str,
+                max_responses_str,
+                min_responses_str
             ]
 
             # Join parts with underscore and add extension
@@ -387,8 +393,8 @@ class Conversation:
                 idea_history = self.extract_idea_evolution()
                 task_type = self.task_config.get("task_type", "AUT")
                 disc_method = self.task_config.get("discussion_method", "all_at_once")
-                
-                if disc_method == "all_at_once":
+
+                if disc_method in ["all_at_once", "iterative_refinement"]:
                     # Group by rounds
                     rounds = {}
                     for entry in idea_history:

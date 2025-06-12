@@ -98,10 +98,11 @@ class GenericDiscussionMode:
                 self.run_iterative_refinement()
             elif discussion_method in ["all_at_once", "one_by_one"]:
                 self.run_discussion()
-            else:
-                self.run_direct_discussion()
         else:
-            self.run_direct_discussion()
+            if discussion_method == "all_at_once":
+                self.run_direct_discussion()
+            if discussion_method == "iterative_refinement":
+                self.run_direct_iterative_refinement()
         print("\n=== Final Token Usage Summary ===")
         print(self.conversation.get_token_summary())
 
@@ -196,8 +197,7 @@ class GenericDiscussionMode:
     def run_iterative_refinement(self):
             # Initialize tracking variables
         print("Starting iterative refinement discussion phase.")
-        convergence_counter = 0  # Track rounds with no improvement
-        convergence_threshold = 3  # Stop after this many non-improvements
+
 
         total_resp = 0
         max_rounds = self.max_responses  # Use the same max as other discussion methods
@@ -208,11 +208,12 @@ class GenericDiscussionMode:
         if not self.data_strategy.current_ideas:
                 self.data_strategy.current_ideas= [self.data_strategy.ranked_ideas[0]]
 
+        consecutive_same_counter = 0
+        last_best_idea = None
+        convergence_threshold = self.task_config.get("llm_count", 3)  # or your config key
+
         # Continue for multiple rounds
         while total_resp < max_rounds:
-
-
-            
             # Track token usage for this phase
             total_prompt_tokens = 0
             total_completion_tokens = 0
@@ -267,6 +268,8 @@ class GenericDiscussionMode:
             # Build ranking prompt (unchanged)
             ideas_to_rank = [new_idea] + self.data_strategy.current_ideas + self.data_strategy.past_current_ideas
             # Randomize order using list operations instead of string operations
+            ideas_to_rank = list(set(ideas_to_rank))  # Remove duplicates (order doesn't matter)
+
             shuffled_ideas = ideas_to_rank[:]  # Create a copy of the list
             random.shuffle(shuffled_ideas)  # Shuffle the copy
             # Create text with randomized order
@@ -287,72 +290,71 @@ class GenericDiscussionMode:
             "Please output the BEST idea based on creativity.\n"
             "Ideas to rank:\n"
             f"{ideas_text}\n"
-            "Provide only the best idea, verbatim.")
+            "Provide only the best idea, verbatim. Do not include any explanations or use markdown formatting. Do not include numbering.")
 
 
 
 
             ranking_prompt = textwrap.dedent(ranking_prompt).strip()
 
-            # Instead of overwriting, combine system_prompt with ranking_prompt in two messages.
-            ranking_msgs = [
-                {"role": role, "content": system_prompt},
+            ranking_msgs.extend([
                 {"role": 'user', "content": ranking_prompt}
-            ]
-            
+            ])
             best_idea, r_prompt_tokens, r_completion_tokens, r_reasoning_tokens = agent.generate_response(ranking_msgs)
-            
+
+            best_idea = re.sub(r'^Idea\s*\d+:\s*', '', best_idea)
+
             # Update token usage
             total_prompt_tokens += r_prompt_tokens
             total_completion_tokens += r_completion_tokens  
             total_reasoning_tokens += r_reasoning_tokens
             
+            self.data_strategy.past_current_ideas.append(self.data_strategy.current_ideas[0])
+            self.data_strategy.current_ideas = [best_idea]
 
             # Determine if the new idea is best and should replace current idea
             if best_idea == new_idea or new_idea in best_idea:
-                self.data_strategy.past_current_ideas.append(self.data_strategy.current_ideas[0])
-                self.data_strategy.current_ideas = [new_idea]
                 print(f"[iterative_refinement] New idea ranked highest and replaced current idea.")
                 replacement_made = True
             else:
+                
                 print(f"[iterative_refinement] Current idea ranked higher. No replacement made.")
                 replacement_made = False
             # Add ranking to conversation log
             self.conversation.add_chat_entry(
                 agent.model_name,
                 agent.name,
-                system_prompt + "\n" + ranking_prompt,
+                "\n".join(m["content"] for m in ranking_msgs),
                 best_idea,
                 "discussion",
                 round_number=total_resp+1
             )
             
-            
-            if len(self.data_strategy.past_current_ideas) >  self.task_config.get("replacement_pool_size", 3):
-                self.data_strategy.past_current_ideas= self.data_strategy.past_current_ideas[-self.task_config.get("replacement_pool_size", 3):]
+            past_current_idea_limit = self.task_config.get("llm_count", 3) + 1  # Default to 10 if not set
+            if len(self.data_strategy.past_current_ideas) >  past_current_idea_limit:
+                self.data_strategy.past_current_ideas= self.data_strategy.past_current_ideas[-past_current_idea_limit:]
             # After ranking and evaluating:
-            if best_idea == new_idea or new_idea in best_idea:
-                # Reset counter when idea improves
-                convergence_counter = 0
-                # Rest of improvement code...
+
+            # ... inside the while loop, after best_idea is determined:
+            if best_idea == last_best_idea:
+                consecutive_same_counter += 1
             else:
-                # Increment counter when no improvement
-                convergence_counter += 1
-                
-            if convergence_counter >= convergence_threshold:
-                print(f"[iterative_refinement] No improvements for {convergence_threshold} rounds. Early stopping.")
-                # Log the final chosen idea
+                consecutive_same_counter = 1
+                last_best_idea = best_idea
+
+            if consecutive_same_counter >= convergence_threshold:
+                print(
+                    f"[iterative_refinement] Same idea chosen for {convergence_threshold} consecutive rounds. Early stopping.")
                 self.conversation.add_chat_entry(
                     agent.model_name,
                     agent.name,
                     "",
-                    f"Replaced: {replacement_made}. Final idea for (Round {total_resp + 1}): {self.data_strategy.current_ideas[0]}",
+                    f"Final idea (Round {total_resp + 1}): {self.data_strategy.current_ideas[0]}",
                     "discussion",
                     current_ideas=self.data_strategy.current_ideas,
                     round_number=total_resp + 1
                 )
                 break
-
             # Log the final chosen idea
             self.conversation.add_chat_entry(
                 agent.model_name,
@@ -378,7 +380,198 @@ class GenericDiscussionMode:
         print(f"Final idea: {self.data_strategy.current_ideas[0]}")
         return
 
+    def run_direct_iterative_refinement(self):
+        # Initialize tracking variables
+        print("Starting iterative refinement discussion phase - without intitial idea generation.")
+        self.data_strategy.current_ideas = []  # Clear current ideas initially.
+        total_resp = 0
+        max_rounds = self.max_responses  # Use the same max as other discussion methods
+        if not hasattr(self.data_strategy, 'past_current_ideas'):
+            self.data_strategy.past_current_ideas = []  # Or deque(maxlen=self.max_past_ideas)
+        if not hasattr(self.data_strategy, 'all_generated_ideas'):
+            self.data_strategy.all_generated_ideas = []  # Start with current
+        if not self.data_strategy.current_ideas:
+            self.data_strategy.current_ideas = []
 
+        consecutive_same_counter = 0
+        last_best_idea = None
+        convergence_threshold = self.task_config.get("llm_count", 3)  # or your config key
+
+        # Continue for multiple rounds
+
+        while total_resp < max_rounds:
+
+            # Track token usage for this phase
+            total_prompt_tokens = 0
+            total_completion_tokens = 0
+            total_reasoning_tokens = 0
+
+            # Capture the current ideas for reference
+
+            # Select agent
+            agent = self._select_next_agent(self.conversation.agents)
+            self.conversation.current_agent = agent
+
+            # Generate new idea using the message strategy
+            msgs = self.message_strategy.construct_messages(agent, "iterative_refinement", self.conversation)
+            print("prompt here", msgs)
+            response, prompt_tokens, completion_tokens, reasoning_tokens = agent.generate_response(msgs)
+            print("response", response)
+            print("total_resp", total_resp)
+            if total_resp == 0:
+                print("here")
+                self.data_strategy.current_ideas = [response]
+                self.data_strategy.all_generated_ideas.append(response)
+                self.conversation.add_chat_entry(agent.model_name, agent.name, "\n".join(m["content"] for m in msgs), response, "direct_discussion",current_ideas=self.data_strategy.current_ideas,round_number=total_resp+1)
+                original_ideas = self.data_strategy.current_ideas.copy()
+                total_resp +=1
+                print("parsed this properly")
+                continue
+            # Parse the JSON response to extract the idea
+            new_idea = response
+            print(f"Extracted idea: {new_idea}")
+            # You can also store the reasoning if needed
+            self.data_strategy.all_generated_ideas.append(new_idea)
+            # Update token usage and conversation log
+            self.conversation.add_chat_entry(
+                agent.model_name,
+                agent.name,
+                "\n".join(m["content"] for m in msgs),
+                response,
+                "discussion",
+                round_number=total_resp + 1
+            )
+            total_prompt_tokens += prompt_tokens
+            total_completion_tokens += completion_tokens
+            total_reasoning_tokens += reasoning_tokens
+
+            print(f"[iterative_refinement] {agent.name} generated new idea: {new_idea}")
+
+            # Now rank the ideas (new idea + current ideas)
+            ranking_msgs = []
+            # Use agent.model_name to set the role properly.
+            model = agent.model_name
+            role = "user" if model in self.task_config.get("role_assignment_in_user_prompt", [None]) else "system"
+
+            # Get task type and add system prompt
+            task_type = self.task_config.get("task_type", "AUT")
+            if task_type == "PS":
+                system_prompt = TASK_REQUIREMENTS['PS_Overall']
+            elif task_type == "AUT":
+                system_prompt = TASK_REQUIREMENTS['AUT_Overall']
+
+            # Build ranking prompt (unchanged)
+            ideas_to_rank = [new_idea] + self.data_strategy.current_ideas + self.data_strategy.past_current_ideas
+            # Randomize order using list operations instead of string operations
+            ideas_to_rank = list(set(ideas_to_rank))  # Remove duplicates (order doesn't matter)
+
+            shuffled_ideas = ideas_to_rank[:]  # Create a copy of the list
+            random.shuffle(shuffled_ideas)  # Shuffle the copy
+            # Create text with randomized order
+            ideas_text = "\n".join([f"Idea {i + 1}: {idea}" for i, idea in enumerate(shuffled_ideas)])
+
+            role = "user" if model in self.task_config.get("role_assignment_in_user_prompt", [None]) else "system"
+
+            ranking_msgs = []
+            ranking_msgs.append({"role": role, "content": f"# **Role**\n{agent.system_message}"})
+
+            if self.task_config.get("task_type", "AUT") == "AUT":
+                ranking_msgs.append({"role": role,
+                                     "content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['AUT_Mode1_Overall'].strip()}"})
+            else:
+                ranking_msgs.append(
+                    {"role": role, "content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['PS_Overall'].strip()}"})
+
+            ranking_prompt = (
+                "We define creativity as a combination of novelty (how original or unexpected the idea is in this context) and usefulness (its potential practical value or impact in addressing the goal). "
+                "Please output the BEST idea based on creativity.\n"
+                "Ideas to rank:\n"
+                f"{ideas_text}\n"
+                "Provide only the best idea, verbatim. Do not include any explanations or use markdown formatting. Do not include numbering.")
+
+            ranking_prompt = textwrap.dedent(ranking_prompt).strip()
+
+            ranking_msgs.extend([
+                {"role": 'user', "content": ranking_prompt}
+            ])
+            best_idea, r_prompt_tokens, r_completion_tokens, r_reasoning_tokens = agent.generate_response(ranking_msgs)
+
+            best_idea = re.sub(r'^Idea\s*\d+:\s*', '', best_idea)
+
+            # Update token usage
+            total_prompt_tokens += r_prompt_tokens
+            total_completion_tokens += r_completion_tokens
+            total_reasoning_tokens += r_reasoning_tokens
+
+            self.data_strategy.past_current_ideas.append(self.data_strategy.current_ideas[0])
+            self.data_strategy.current_ideas = [best_idea]
+
+            # Determine if the new idea is best and should replace current idea
+            if best_idea == new_idea or new_idea in best_idea:
+                print(f"[iterative_refinement] New idea ranked highest and replaced current idea.")
+                replacement_made = True
+            else:
+
+                print(f"[iterative_refinement] Current idea ranked higher. No replacement made.")
+                replacement_made = False
+            # Add ranking to conversation log
+            self.conversation.add_chat_entry(
+                agent.model_name,
+                agent.name,
+                "\n".join(m["content"] for m in ranking_msgs),
+                best_idea,
+                "discussion",
+                round_number=total_resp + 1
+            )
+
+            past_current_idea_limit = self.task_config.get("llm_count", 3) + 1  # Default to 10 if not set
+            if len(self.data_strategy.past_current_ideas) >  past_current_idea_limit:
+                self.data_strategy.past_current_ideas= self.data_strategy.past_current_ideas[-past_current_idea_limit:]
+
+            # ... inside the while loop, after best_idea is determined:
+            if best_idea == last_best_idea:
+                consecutive_same_counter += 1
+            else:
+                consecutive_same_counter = 1
+                last_best_idea = best_idea
+
+            if consecutive_same_counter >= convergence_threshold:
+                print(
+                    f"[iterative_refinement] Same idea chosen for {convergence_threshold} consecutive rounds. Early stopping.")
+                self.conversation.add_chat_entry(
+                    agent.model_name,
+                    agent.name,
+                    "",
+                    f"Final idea (Round {total_resp + 1}): {self.data_strategy.current_ideas[0]}",
+                    "discussion",
+                    current_ideas=self.data_strategy.current_ideas,
+                    round_number=total_resp + 1
+                )
+                break
+            # Log the final chosen idea
+            self.conversation.add_chat_entry(
+                agent.model_name,
+                agent.name,
+                "",
+                f"Replaced: {replacement_made}. Final idea for (Round {total_resp + 1}): {self.data_strategy.current_ideas[0]}",
+                "discussion",
+                current_ideas=self.data_strategy.current_ideas,
+                round_number=total_resp + 1
+            )
+
+            # Update total token usage for the phase
+            self.conversation.update_phase_token_usage(
+                "discussion",
+                total_prompt_tokens,
+                total_completion_tokens,
+                total_reasoning_tokens
+            )
+            print("Starting iterative refinement discussion phase.")
+            total_resp += 1
+        print("Iterative refinement phase completed.")
+        print(f"Original idea: {original_ideas[0] if original_ideas else '(none)'}")
+        print(f"Final idea: {self.data_strategy.current_ideas[0]}")
+        return
 
     def run_creative_generation(self):
         print("Starting creative generation phase.")
@@ -630,6 +823,21 @@ class GenericDiscussionMode:
         print("\n=== Token Usage Summary (Discussion Phase) ===")
         print(self.conversation.get_token_summary())
 
+    def generate_with_retries(self, agent, msgs, max_retries=20):
+        """
+        Call agent.generate_response, parse with parse_fn, retry on parse failure.
+        parse_fn should return a truthy value on success, or None on failure.
+        """
+        for attempt in range(1, max_retries + 1):
+            resp, pt, ct, rt = agent.generate_response(msgs)
+            agent_name = self.conversation.current_agent.name
+            logging.info("Agent response: %s", resp)
+            result = self.data_strategy._parse_one_by_one_response_validate(resp, agent_name)
+            if result[0] is not None:
+                return resp, pt, ct, rt
+            logging.warning("Attempt %d/%d: invalid parse, retrying…", attempt, max_retries)
+
+        raise RuntimeError(f"Failed to get valid response after {max_retries} attempts")
     def discussion_all_at_once(self):
         """
         Handles 'all_at_once' discussion.
@@ -764,52 +972,25 @@ class GenericDiscussionMode:
                         agent, 'discussion', self.conversation,
                         total_resp=total_resp, max_rounds=self.max_responses
                     )
-                    resp, pt, ct, rt = agent.generate_response(msgs)
+                    #resp, pt, ct, rt = agent.generate_response(msgs)
+
+                    resp, pt, ct, rt = self.generate_with_retries(
+                        agent,
+                        msgs
+                    )
+
+
                     potential_responses[agent.name] = {
                         "response": resp, "prompt_tokens": pt, "completion_tokens": ct,
                         "reasoning_tokens": rt, "messages": msgs
                     }
-                    # print(f"    {agent.name} potential: {resp[:80]}...") # Optional: Log snippet
 
+
+
+                    # print(f"    {agent.name} potential: {resp[:80]}...") # Optional: Log snippet
                 # Step 2: Generate Intention Scores
                 intention_scores = {}
-                print("  Generating Intention Scores...")
                 total_intention_pt, total_intention_ct, total_intention_rt = 0, 0, 0
-                agree_count = 0
-                for agent in remain:
-                    agent_potential_response = potential_responses[agent.name]["response"]
-                    expected_agree_phrase = "agree: no changes needed."
-
-                    response_processed = agent_potential_response.strip().lower()
-                    expected_processed = expected_agree_phrase.strip().lower()
-                    if response_processed.find(expected_processed) != -1: # <--- MODIFIED LINE using find()
-                        print(f"Agreement phrase '{expected_agree_phrase}' found!")
-                        agree_count += 1
-                    else:
-                        print(f"Agreement phrase '{expected_agree_phrase}' not found.")
-                if agree_count == len(remain):
-                    print(f"All agents agreed (all_at_once, order: {disc_order}).")
-
-
-                    # Log this agreement round before exiting
-
-                    self.conversation.add_chat_entry(
-                        agent='System',  # Keyword doesn't match 'model_name'
-                        agent_model='Agreement Protocol',  # Keyword doesn't match 'agent_name'
-                        prompt='N/A (Early agreement detected in potential responses)',
-                        response='All remaining agents generated potential responses indicating agreement.',
-                        phase='discussion',  # Keyword matches 'phase'
-                        current_ideas=self.data_strategy.current_ideas,
-                        round_number=total_resp + 1
-                    )
-
-                    total_resp += 1 # Increment count because this round *did* happen (it resulted in agreement)
-
-
-                    self._print_final()
-                    return
-
-
 
                 for agent in remain:
                     self.conversation.current_agent = agent # Context for message generation
@@ -831,11 +1012,10 @@ class GenericDiscussionMode:
                     )
                     intention_msgs =[]
                     intention_msgs.append({"role": role, "content": f"# **Role**\n{agent.system_message}"})
-
                     if self.task_config.get("task_type","AUT")=="AUT":
-                        msgs.append({"role":role,"content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['AUT_Mode1_Overall'].strip()}"})
+                        intention_msgs.append({"role":role,"content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['AUT_Mode1_Overall'].strip()}"})
                     else:
-                        msgs.append({"role":role,"content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['PS_Overall'].strip()}"})
+                        intention_msgs.append({"role":role,"content": f"\n# **Task Requirement**\n{TASK_REQUIREMENTS['PS_Overall'].strip()}"})
 
 
                     intention_msgs.append({"role": 'user', "content": intention_prompt})
@@ -843,17 +1023,19 @@ class GenericDiscussionMode:
                     score_resp, ipt, ict, irt = agent.generate_response(intention_msgs)
 
                     # Parse the score
-                    score = 0 # Default score
+                    # Parse the score (supports decimals)
+                    score = 0.0  # Default score as float
                     try:
-                        match = re.search(r'\d+', score_resp)
+                        match = re.search(r'\d+(\.\d+)?', score_resp)
                         if match:
-                            score = int(match.group(0))
-                            score = max(1, min(10, score)) # Clamp score to range 1-10
+                            score = float(match.group(0))
+                            score = max(1.0, min(10.0, score))  # Clamp score to range 1-10
                         else:
-                             print(f"    Warning: Could not parse score from '{score_resp}' for {agent.name}. Defaulting to 0.")
+                            print(
+                                f"    Warning: Could not parse score from '{score_resp}' for {agent.name}. Defaulting to 0.")
                     except Exception as e:
-                        print(f"    Warning: Error parsing score for {agent.name} ('{score_resp}'): {e}. Defaulting to 0.")
-
+                        print(
+                            f"    Warning: Error parsing score for {agent.name} ('{score_resp}'): {e}. Defaulting to 0.")
                     intention_scores[agent.name] = {
                         "score": score,
                         "raw_response": score_resp,
@@ -938,7 +1120,13 @@ class GenericDiscussionMode:
                     selected_agent, 'discussion', self.conversation,
                     total_resp=total_resp, max_rounds=self.max_responses
                 )
-                selected_response, generation_pt, generation_ct, generation_rt = selected_agent.generate_response(selected_messages)
+
+                selected_response, generation_pt, generation_ct, generation_rt = self.generate_with_retries(
+                    selected_agent,
+                    selected_messages
+                )
+
+                # selected_response, generation_pt, generation_ct, generation_rt = selected_agent.generate_response(selected_messages)
 
 
             # --- Commit Stage (Common for both branches) ---
@@ -948,6 +1136,7 @@ class GenericDiscussionMode:
                 self.conversation.update_phase_token_usage("discussion", generation_pt, generation_ct, generation_rt)
 
                 print(f"[{disc_order}] {selected_agent.name} => {selected_response}")
+                ideas_at_start_of_turn = list(self.data_strategy.current_ideas)
 
                 # Update shared data using the *selected* response
                 self.data_strategy.update_shared_data(self.conversation, selected_response)
@@ -958,11 +1147,26 @@ class GenericDiscussionMode:
                     "\n".join(m['content'] for m in selected_messages),
                     selected_response,
                     'discussion',
-                    current_ideas=self.data_strategy.current_ideas, # Log current state
+                    current_ideas=ideas_at_start_of_turn, # Log state BEFORE update
                     round_number=total_resp + 1
                 )
-                total_resp += 1
 
+                total_resp += 1
+                if disc_order == "hand_raising":
+                    if "agree: no changes needed" in selected_response.lower():
+                        print(f"All agents agreed (all_at_once, order: {disc_order}).")
+                        self._print_final()
+                                            # Log this agreement round before exiting
+                        self.conversation.add_chat_entry(
+                            'system',  # Keyword doesn't match 'model_name'
+                            "system",
+                            'N/A (Early agreement detected in potential responses)',
+                            "Final idea selection from creative generation process",
+                            'discussion',  # Keyword matches 'phase'
+                            current_ideas=[self.data_strategy.current_ideas[0]],
+                            round_number=total_resp + 1
+                        )
+                        return
                 # Check agreement *after* the selected agent has spoken and state updated
                 if self.data_strategy.all_agents_agreed(self.conversation.agents):
                     print(f"All agents agreed (all_at_once, order: {disc_order}).")
