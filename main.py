@@ -18,7 +18,7 @@ def parse_model_and_effort(model_str):
 def main(llm_count=1, model = 'gpt-4o', temperature=1, persona_type=None, phases="three_stage", generation_method="dependent", 
          selection_method="rating", discussion_method="all_at_once", 
          discussion_order_method="fixed", task_type="PS", replacement_pool_size=0, 
-         skip_to_discussion=False, max_responses=30, min_responses=None):
+         skip_to_discussion=False, max_responses=30, min_responses=None, question_id="plastic_waste"):
     try:
         ROLES = get_randomized_roles_with_fixed_same(llm_count)
 
@@ -69,7 +69,7 @@ def main(llm_count=1, model = 'gpt-4o', temperature=1, persona_type=None, phases
         #     "phases": phases,          # "three_stage" or "direct_discussion"
         #     "generation_method": generation_method, # "independent" or "dependent"
         #     "selection_method": "rating", # "selectionTop" or "rating"
-        #     "discussion_method": "all_at_once",  # "all_at_once" or "one_by_one", "open", or "iterative_refinement", or "creative"
+        #     "discussion_method": "all_at_once",  # "all_at_once" or "one_by_one", "open", or "iterative_refinement", or "creative" or "none"
         #     "discussion_order_method": "fixed",  # "fixed" or "random" or "hand_raising"
         #     "persona_type":persona_type,
         #     "llm_count":llm_count,
@@ -94,6 +94,7 @@ def main(llm_count=1, model = 'gpt-4o', temperature=1, persona_type=None, phases
             "max_responses": max_responses,
             "min_responses": min_responses,  # New config option to hide agree until specified round
             "reasoning_efforts": reasoning_efforts,  # Add reasoning efforts to config
+            "question_id": question_id,  # Add question_id to config
         }
 
         data_strategy = GenericDataStrategy(task_config=task_config)

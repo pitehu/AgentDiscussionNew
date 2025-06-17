@@ -2,11 +2,12 @@
 
 import random
 import logging
-from prompts import TASK_REQUIREMENTS
+from prompts import TASK_REQUIREMENTS, PS_QUESTIONS, PS_OVERALL
 import json
 import re
 from collections import defaultdict
 import textwrap
+import os
 
 class GenericDiscussionMode:
     def __init__(self, conversation, task_config, message_strategy):
@@ -17,27 +18,43 @@ class GenericDiscussionMode:
         self.max_responses = task_config.get("max_responses")
         logging.info("Discussion mode initialized with task configuration: %s", self.task_config)
 
-    # def run(self):
-    #     phases= self.task_config.get("phases","three_stage")
-    #     if phases=="three_stage":
-    #         self.run_generation()
-    #         self.run_selection()
-    #         self.run_discussion()
-    #     else:
-    #         self.run_direct_discussion()
-        
-    #     print("\n=== Final Token Usage Summary ===")
-    #     print(self.conversation.get_token_summary())
-
     def run(self, skip_to_discussion=False):
         phases= self.task_config.get("phases","three_stage")
         discussion_method = self.task_config.get("discussion_method", "all_at_once")
+        question_id = self.task_config.get("question_id", "global_warming")  # Get question ID from config
 
-        single_llm_mode = len(self.conversation.agents) == 1 
+        # Set the appropriate question in prompts
+        if question_id in PS_QUESTIONS:
+            PS_OVERALL = PS_QUESTIONS[question_id]
+        else:
+            print(f"Warning: Question ID '{question_id}' not found. Using default question.")
+
+        # Create output directory for this question
+        output_dir = f"results/{question_id}"
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Update conversation's output directory
+        self.conversation.output_dir = output_dir
+
+        single_llm_mode = len(self.conversation.agents) == 1
         if single_llm_mode:
             self.run_single_llm_mode()
-        elif discussion_method == "open":
-            self.run_open_discussion()
+        elif discussion_method == "none":
+            # Skip discussion phase entirely
+            print("Discussion phase skipped (discussion_method=none)")
+            return
+        elif phases == "direct_discussion":
+            # Handle direct discussion phase with different discussion methods
+            if discussion_method == "open":
+                self.run_open_discussion()
+            elif discussion_method == "all_at_once":
+                self.run_direct_discussion()
+            elif discussion_method == "iterative_refinement":
+                self.run_direct_iterative_refinement()
+            elif discussion_method == "one_by_one":
+                self.run_direct_discussion()
+            else:
+                print(f"Warning: Unsupported discussion_method '{discussion_method}' for direct_discussion phase")
         elif phases == "three_stage":
             if not skip_to_discussion:
                 phases = self.task_config.get("phases", "three_stage")   
@@ -99,10 +116,8 @@ class GenericDiscussionMode:
             elif discussion_method in ["all_at_once", "one_by_one"]:
                 self.run_discussion()
         else:
-            if discussion_method == "all_at_once":
-                self.run_direct_discussion()
-            if discussion_method == "iterative_refinement":
-                self.run_direct_iterative_refinement()
+            print(f"Warning: Unsupported phases '{phases}'")
+        
         print("\n=== Final Token Usage Summary ===")
         print(self.conversation.get_token_summary())
 
@@ -1161,7 +1176,7 @@ class GenericDiscussionMode:
                             'system',  # Keyword doesn't match 'model_name'
                             "system",
                             'N/A (Early agreement detected in potential responses)',
-                            "Final idea selection from creative generation process",
+                            "Final idea selection from discussion process",
                             'discussion',  # Keyword matches 'phase'
                             current_ideas=[self.data_strategy.current_ideas[0]],
                             round_number=total_resp + 1

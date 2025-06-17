@@ -119,16 +119,32 @@ AUT_MODE1_DISCUSSION_SELECTIONTOP_ONEBYONE = """
 """
 
 # ========== Problem Solving ========== #
-PS_OVERALL_Single = """
-Task: Global warming, which refers to the ongoing increase in global average temperature, has an increasingly large impact on the environment. Please come up with one creative idea to slow global warming. 
+PS_QUESTIONS = {
+    "plastic_waste": """
+Task: Plastic waste is one of the biggest environmental problems of our lifetime. You are collaborating with other team members to come up with one creative idea to reduce plastic pollution.
 The idea will be evaluated on its creativity (i.e., it should be both novel and useful).
-The idea should be around 80-100 words.
-"""
-
-PS_OVERALL = """
-Task: Global warming, which refers to the ongoing increase in global average temperature, has an increasingly large impact on the environment. You are collaborating with other team members to come up with one creative idea to slow global warming.
+""",
+    "supply_chain": """
+Task: Vulnerabilities within a supply chain could lead to uncontrolled costs and inefficient delivery schedules. You are collaborating with other team members to come up with one creative idea to tackle supply chain security.
+The idea will be evaluated on its creativity (i.e., it should be both novel and useful).
+""",
+    "sorry_pandemic": """
+Task: Imagine a new pandemic has emerged that is transmitted by saying the word "sorry". You are collaborating with other team members to come up with one creative idea to reduce its spread.
+The idea will be evaluated on its creativity (i.e., it should be both novel and useful).
+""",
+    "education_inequality": """
+Task: Educational inequality is the unequal distribution of academic resources to disadvantaged and marginalised groups. You are collaborating with other team members to come up with one creative idea to overcome inequality in education.
+The idea will be evaluated on its creativity (i.e., it should be both novel and useful).
+""",
+    "employee_attrition": """
+Task: Voluntary attrition happens when an employee decides to leave the company, resulting in the reduction of valued talent in the workforce. You are collaborating with other team members to come up with one creative idea to improve access to stop voluntary employee attrition.
+The idea will be evaluated on its creativity (i.e., it should be both novel and useful).
+""",
+    "singing_shower": """Task: Imagine a new research study discovers that singing in the shower for 20 minutes or more is good for health. You are collaborating with other team members to come up with one creative idea to encourage people to do this.
 The idea will be evaluated on its creativity (i.e., it should be both novel and useful).
 """
+}
+PS_OVERALL = PS_QUESTIONS["plastic_waste"]  # Default to plastic waste question
 
 PS_GENERATION = """
 - Please propose 5 possible ideas for the problem.
@@ -489,9 +505,6 @@ TASK_REQUIREMENTS = {
     "AUT_Mode1_Discussion_SelectionTop_AllAtOnce_OtherAgents": AUT_MODE1_DISCUSSION_SELECTIONTOP_ALLATONCE_OTHERAGENTS,
     "AUT_Mode1_Discussion_Rating_OneByOne": AUT_MODE1_DISCUSSION_RATING_ONEBYONE,
     "AUT_Mode1_Discussion_SelectionTop_OneByOne": AUT_MODE1_DISCUSSION_SELECTIONTOP_ONEBYONE,
-
-    "PS_Overall_Single": PS_OVERALL_Single,
-    "PS_Overall": PS_OVERALL,
     "PS_Generation": PS_GENERATION,
     "PS_Generation_Dependent": PS_GENERATION_DEPENDENT,
     "PS_Selection_Rating": PS_SELECTION_RATING,
@@ -499,6 +512,8 @@ TASK_REQUIREMENTS = {
     "PS_Selection_SelectionTop": PS_SELECTION_SELECTIONTOP,
     "PS_Discussion_SelectionTop": PS_DISCUSSION_SELECTIONTOP,
     "PS_Discussion_Rating": PS_DISCUSSION_RATING,
+    "PS_Overall": PS_OVERALL,
+    "PS_Overall_Single": PS_OVERALL,
 
     "AUT_Direct_First_Round_AllAtOnce": AUT_DIRECT_FIRST_ROUND_ALL_AT_ONCE,
     "AUT_Direct_Dicussion_AllAtOnce": AUT_DIRECT_DISCUSSION_ALL_AT_ONCE,

@@ -359,12 +359,19 @@ class Conversation:
             # Optional: Further sanitization like removing consecutive underscores or length limiting
             base_filename = base_filename.replace("__", "_") # Clean up potential double underscores if parts were empty/NA
 
-
-
-            filename = base_filename
+            # Use output_dir if it exists, otherwise save to current directory
+            if hasattr(self, 'output_dir') and self.output_dir:
+                filename = os.path.join(self.output_dir, base_filename)
+            else:
+                filename = base_filename
+                
             version = 1
+            original_filename = filename
             while os.path.exists(filename):
-                filename = f"{os.path.splitext(base_filename)[0]}_v{version}.txt"
+                if hasattr(self, 'output_dir') and self.output_dir:
+                    filename = os.path.join(self.output_dir, f"{os.path.splitext(base_filename)[0]}_v{version}.txt")
+                else:
+                    filename = f"{os.path.splitext(base_filename)[0]}_v{version}.txt"
                 version += 1
 
         try:
@@ -447,10 +454,19 @@ class Conversation:
         except Exception as e:
             logging.error("Failed to save chat history: %s", e)
 
-            backup_filename = "chat_backup.txt"
+            # Use output_dir for backup filename too
+            if hasattr(self, 'output_dir') and self.output_dir:
+                backup_filename = os.path.join(self.output_dir, "chat_backup.txt")
+            else:
+                backup_filename = "chat_backup.txt"
+                
             version = 1
+            original_backup = backup_filename
             while os.path.exists(backup_filename):
-                backup_filename = f"chat_backup_v{version}.txt"
+                if hasattr(self, 'output_dir') and self.output_dir:
+                    backup_filename = os.path.join(self.output_dir, f"chat_backup_v{version}.txt")
+                else:
+                    backup_filename = f"chat_backup_v{version}.txt"
                 version += 1
 
             try:
